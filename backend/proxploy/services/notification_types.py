@@ -1,6 +1,6 @@
 """Which notification type owns which job outcome.
 
-Nineteen rows, not one per job kind: eleven of the 33 registered kinds earn a
+Twenty rows, not one per job kind: eleven of the 33 registered kinds earn a
 named row; the other 22 fall through to the generic Job rows. The catch-all is
 load-bearing — without it, adding a job kind would silently stop notifying.
 Each kind owns two of the four terminal outcomes; cancel and interrupt are
@@ -43,6 +43,7 @@ TYPES: tuple[NotificationType, ...] = (
     NotificationType("alert.fired", "Alert triggered", "Alerts"),
     NotificationType("alert.resolved", "Alert resolved", "Alerts"),
     NotificationType("audit.error", "Audited action failed", "Audit"),
+    NotificationType("update.available", "Update available", "Housekeeping"),
 )
 
 BY_KEY: dict[str, NotificationType] = {t.key: t for t in TYPES}
@@ -56,7 +57,7 @@ _KIND_PREFIX: dict[str, str] = {
     "app.uninstall": "app.uninstall",
     "backup.run": "backup",
     "backup.restore": "backup.restore",
-    # The two built-in system schedules, plus backup retention work on the
+    # The built-in system schedules, plus backup retention work on the
     # same unattended footing. `backup.sync` sits under "housekeeping", not
     # "backup": nobody asks for one, GET /backups enqueues it whenever the
     # cache is stale (api/backups.py::list_backups), so filing it as a backup
@@ -67,6 +68,10 @@ _KIND_PREFIX: dict[str, str] = {
     "backup.sync": "housekeeping",
     "backup.delete": "housekeeping",
     "backup.prune": "housekeeping",
+    "sessions.cleanup": "housekeeping",
+    "jobs.prune": "housekeeping",
+    "db.compact": "housekeeping",
+    "update.check": "housekeeping",
 }
 
 # Cancel and interrupt are never categorised, whatever the kind.

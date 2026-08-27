@@ -97,6 +97,7 @@
   --color-topbar: var(--topbar);
   --color-scrim: var(--scrim);
   --font-display: 'Space Grotesk', system-ui, sans-serif;
+  --font-badge: 'Goldman', 'Space Grotesk', system-ui, sans-serif;
   --font-ui: 'Inter', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, monospace;
   --radius-card: 14px;
@@ -159,6 +160,10 @@ body {
 .pp-tick      { animation: pp-tick .25s cubic-bezier(.2,.9,.3,1.4) both; display: inline-block }
 .pp-in-fwd    { animation: pp-in-fwd .22s ease-out both }
 .pp-in-back   { animation: pp-in-back .22s ease-out both }
+
+@keyframes pp-blink { 0%, 49% { opacity: 1 } 50%, 100% { opacity: 0 } }
+.pp-blink { animation: pp-blink 1.1s steps(1, end) infinite }
+@media (prefers-reduced-motion: reduce) { .pp-blink { animation: none; opacity: 1 } }
 .pp-progress-sweep { animation: pp-progress-sweep 1.4s ease-in-out infinite }
 
 @media (prefers-reduced-motion: reduce) {

@@ -1,5 +1,6 @@
 import asyncio
 import random
+from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
@@ -28,7 +29,8 @@ def entitlements(ent=Depends(get_entitlements)):
         grace = {"expires_at": to_iso(st.expires_at),
                  "grace_until": to_iso(st.grace_until), "in_grace": st.in_grace}
     return {"tier": st.tier, "features": ent.snapshot(), "grace": grace,
-            "clock_skew": st.clock_skew}
+            "clock_skew": st.clock_skew, "refresh_error": ent.refresh_error,
+            "reason": st.reason}
 
 
 class LicenseIn(BaseModel):
@@ -128,7 +130,12 @@ async def _refresh_loop(app) -> None:
                     pass
                 req = _Req(); req.app = app
                 apply_new_token(req, db, out["token"], out.get("cert"))
-        except Exception:
+                app.state.entitlements.refresh_error = None
+        except Exception as e:
+            app.state.entitlements.refresh_error = str(e) or e.__class__.__name__
+            with app.state.sessionmaker() as db:
+                app.state.entitlements.revalidation_lapsed(
+                    db, timedelta(days=app.state.settings.license_revalidation_days))
             continue  # doc 07 §8: transient failure = keep serving, retry later
 
 

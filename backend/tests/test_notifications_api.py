@@ -314,7 +314,7 @@ def test_types_lists_every_row_with_its_live_value(tmp_path, csrf_header, bootst
         r = c.get("/api/v1/notifications/types")
         assert r.status_code == 200
         rows = r.json()["types"]
-        assert len(rows) == 19
+        assert len(rows) == 20
         by_key = {t["key"]: t for t in rows}
         assert by_key["job.failed"]["enabled"] is True
         assert by_key["job.failed"]["label"] == "Job failed"

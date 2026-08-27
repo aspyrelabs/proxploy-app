@@ -1,6 +1,7 @@
 import http.client
 import shutil
 from contextlib import asynccontextmanager
+from datetime import timedelta
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -118,7 +119,9 @@ def create_app(
         app.state.engine = make_engine(settings)
         app.state.sessionmaker = make_sessionmaker(app.state.engine)
         with app.state.sessionmaker() as db:
-            app.state.entitlements.load(db, app.state.secretstore)
+            app.state.entitlements.load(
+                db, app.state.secretstore,
+                timedelta(days=settings.license_revalidation_days))
 
         from proxploy.services.authz import build_enforcer
         with app.state.sessionmaker() as db:
@@ -148,6 +151,7 @@ def create_app(
         from proxploy.services import catalog as _catalog  # noqa: F401  (registers catalog.refresh)
         from proxploy.services import guestjobs as _guestjobs  # noqa: F401  (registers network.apply)
         from proxploy.services import lifecycle  # noqa: F401  (registers job handlers)
+        from proxploy.services import maintenance as _maintenance  # noqa: F401  (registers sessions.cleanup / jobs.prune / db.compact / update.check)
         from proxploy.services import migrate as _migrate  # noqa: F401  (registers migrate.app)
         from proxploy.services import storagejobs as _storagejobs  # noqa: F401  (registers storage.upload/delete_volume)
         from proxploy.services import metrics as _metrics  # noqa: F401  (registers metrics.maintain)

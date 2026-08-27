@@ -59,6 +59,7 @@ vi.mock('../api/client', () => {
 
 import { ScheduleForm } from '../components/ScheduleForm'
 import { SchedulesCard } from '../routes/settings'
+import { BACKUP_KINDS } from '../api/schedules'
 
 const wrap = (ui: React.ReactNode) => {
   const qc = new QueryClient({ defaultOptions: {
@@ -180,6 +181,32 @@ describe('ScheduleForm', () => {
     hosts = [{ id: 1, name: 'host-01' }]
   })
 
+  it('excludes given kinds from what to run and defaults to the first remaining kind', () => {
+    posted.length = 0
+    wrap(<ScheduleForm exclude={[...BACKUP_KINDS, 'app.update']} onSaved={() => {}} />)
+    const select = screen.getByLabelText(/what to run/i) as HTMLSelectElement
+    expect(select.value).toBe('catalog.refresh')
+    const offered = [...select.querySelectorAll('option')].map((o) => o.getAttribute('value'))
+    expect(offered).not.toContain('backup.run')
+    expect(offered).not.toContain('backup.verify')
+    expect(offered).not.toContain('app.update')
+    expect(offered).toContain('catalog.refresh')
+  })
+
+  it('renders a Close button that calls onCancel', () => {
+    posted.length = 0
+    const onCancel = vi.fn()
+    wrap(<ScheduleForm jobKind="backup.run" onSaved={() => {}} onCancel={onCancel} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+    expect(onCancel).toHaveBeenCalledTimes(1)
+  })
+
+  it('renders no Close button when onCancel is not given', () => {
+    posted.length = 0
+    wrap(<ScheduleForm jobKind="backup.run" onSaved={() => {}} />)
+    expect(screen.queryByRole('button', { name: 'Close' })).toBeNull()
+  })
+
   it('shows an entitlement message, not the generic one, on a 403', async () => {
     posted.length = 0
     notifyError.mockClear()
@@ -232,8 +259,10 @@ describe('SchedulesCard', () => {
                    cron: '0 2 * * *', timezone: 'UTC', params: {}, enabled: true,
                    created_by: 1, last_run_at: null, next_run_at: null }]
     wrap(<SchedulesCard />)
-    await waitFor(() => screen.getByRole('button', { name: /disable/i }))
-    fireEvent.click(screen.getByRole('button', { name: /disable/i }))
+    await waitFor(() => screen.getByRole('button', { name: /more actions/i }))
+    fireEvent.pointerDown(screen.getByRole('button', { name: /more actions/i }),
+                          { button: 0, ctrlKey: false })
+    fireEvent.click(await screen.findByRole('menuitem', { name: /disable/i }))
     await waitFor(() => expect(posted.length).toBe(1))
     expect(posted[0]).toMatchObject({ path: '/schedules/1', method: 'PATCH',
                                       body: { enabled: false } })
@@ -275,6 +304,47 @@ describe('SchedulesCard', () => {
     expect(screen.queryByRole('button', { name: /new schedule/i })).toBeNull()
     expect(screen.queryByRole('button', { name: /run now/i })).toBeNull()
     features = { 'sched.windows': true, 'store.auto_update': true }
+  })
+})
+
+describe('SchedulesCard filtering', () => {
+  const MIXED = [
+    { id: 1, name: 'Nightly backup', job_kind: 'backup.run',
+      cron: '0 2 * * *', timezone: 'UTC', params: {}, enabled: true, created_by: 1,
+      last_run_at: null, next_run_at: null },
+    { id: 2, name: 'Weekly verify', job_kind: 'backup.verify',
+      cron: '0 3 * * 0', timezone: 'UTC', params: {}, enabled: true, created_by: 1,
+      last_run_at: null, next_run_at: null },
+    { id: 3, name: 'Catalog sync', job_kind: 'catalog.refresh',
+      cron: '0 4 * * *', timezone: 'UTC', params: {}, enabled: true, created_by: null,
+      last_run_at: null, next_run_at: null },
+  ]
+
+  it('lists non-backup schedules and hides backup.run/backup.verify with exclude', async () => {
+    posted.length = 0
+    schedules = MIXED
+    wrap(<SchedulesCard exclude={BACKUP_KINDS} />)
+    await waitFor(() => expect(screen.getByText('Catalog sync')).toBeInTheDocument())
+    expect(screen.queryByText('Nightly backup')).not.toBeInTheDocument()
+    expect(screen.queryByText('Weekly verify')).not.toBeInTheDocument()
+  })
+
+  it('lists only the backup schedules with only', async () => {
+    posted.length = 0
+    schedules = MIXED
+    wrap(<SchedulesCard only={BACKUP_KINDS} />)
+    await waitFor(() => expect(screen.getByText('Nightly backup')).toBeInTheDocument())
+    expect(screen.getByText('Weekly verify')).toBeInTheDocument()
+    expect(screen.queryByText('Catalog sync')).not.toBeInTheDocument()
+  })
+
+  it('still shows a schedule whose job_kind is not in SCHEDULABLE at all, under exclude', async () => {
+    posted.length = 0
+    schedules = [{ id: 4, name: 'Mystery job', job_kind: 'something.unknown',
+      cron: '0 5 * * *', timezone: 'UTC', params: {}, enabled: true, created_by: null,
+      last_run_at: null, next_run_at: null }]
+    wrap(<SchedulesCard exclude={BACKUP_KINDS} />)
+    await waitFor(() => expect(screen.getByText('Mystery job')).toBeInTheDocument())
   })
 })
 

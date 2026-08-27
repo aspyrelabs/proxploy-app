@@ -34,11 +34,32 @@ def test_seeding_does_not_resurrect_a_system_schedule_the_operator_disabled(tmp_
     assert row.enabled is False
 
 
+def test_system_schedules_include_the_four_maintenance_jobs():
+    import proxploy.services.maintenance  # noqa: F401  (registers the handlers)
+
+    kinds = {s["job_kind"] for s in SYSTEM_SCHEDULES}
+    assert {"sessions.cleanup", "jobs.prune", "db.compact",
+           "update.check"} <= kinds
+
+
+def test_seeding_creates_the_four_maintenance_schedules_on_a_fresh_db(tmp_path):
+    db = make_db(tmp_path)
+    seed_system_schedules(db)
+    kinds = {s.job_kind for s in db.query(Schedule).all()}
+    assert {"sessions.cleanup", "jobs.prune", "db.compact",
+           "update.check"} <= kinds
+    assert seed_system_schedules(db) == 0
+    kinds_after = [s.job_kind for s in db.query(Schedule).all()]
+    for kind in ("sessions.cleanup", "jobs.prune", "db.compact", "update.check"):
+        assert kinds_after.count(kind) == 1
+
+
 def test_every_system_schedule_names_a_registered_handler():
     """Seeding a kind with no handler would disable itself on first tick."""
     from proxploy.jobs import HANDLERS
     import proxploy.services.metrics          # noqa: F401  (registers metrics.maintain)
     import proxploy.services.catalog          # noqa: F401  (registers catalog.refresh)
+    import proxploy.services.maintenance      # noqa: F401  (registers the four housekeeping jobs)
     for s in SYSTEM_SCHEDULES:
         assert s["job_kind"] in HANDLERS, s["name"]
 

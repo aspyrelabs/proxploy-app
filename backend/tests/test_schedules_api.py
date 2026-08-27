@@ -1,5 +1,7 @@
 """Schedules CRUD (doc 05 §Schedules)."""
-from proxploy.models import AuditEvent, Job, Schedule
+from datetime import timedelta
+
+from proxploy.models import AuditEvent, Job, Schedule, utcnow
 from tests.support import make_app
 
 from fastapi.testclient import TestClient
@@ -24,6 +26,18 @@ def _by_id(rows, sid):
     whatever a test creates, so index [0] is not reliably "the row I just
     made"."""
     return next(r for r in rows if r["id"] == sid)
+
+
+def _seed_job(client, schedule_id, **over):
+    """A job row standing in for a past run, same pattern as test_jobs_api's
+    _seed: the run history is just `jobs` rows, there is nothing else to
+    create."""
+    with client.app.state.sessionmaker() as db:
+        job = Job(kind="backup.run", status=over.pop("status", "succeeded"),
+                  schedule_id=schedule_id, **over)
+        db.add(job)
+        db.commit()
+        return job.id
 
 
 def test_create_computes_next_run_at_and_audits(client, csrf_header, bootstrap_admin):
@@ -286,3 +300,55 @@ def test_entitlement_gate_runs_after_auth_not_before(tmp_path, csrf_header):
         c.app.state.entitlements._features = {}
         assert c.post("/api/v1/schedules", headers=h, json={}).status_code == 401
         assert c.get("/api/v1/schedules").status_code == 401
+
+
+def test_list_reports_last_run_as_the_newest_job(client, csrf_header, bootstrap_admin):
+    h = _admin(client, csrf_header, bootstrap_admin)
+    sid = _create(client, h).json()["id"]
+    idle_sid = _create(client, h, name="Never run").json()["id"]
+
+    _seed_job(client, sid, status="succeeded")
+    newest_id = _seed_job(client, sid, status="failed", error="disk full")
+
+    rows = client.get("/api/v1/schedules").json()
+
+    last_run = _by_id(rows, sid)["last_run"]
+    assert last_run["job_id"] == newest_id       # the newer of the two, not the first
+    assert last_run["status"] == "failed"
+    assert last_run["error"] == "disk full"
+
+    assert _by_id(rows, idle_sid)["last_run"] is None
+
+
+def test_runs_lists_newest_first_and_excludes_other_schedules(
+        client, csrf_header, bootstrap_admin):
+    h = _admin(client, csrf_header, bootstrap_admin)
+    sid = _create(client, h).json()["id"]
+    other_sid = _create(client, h, name="Other").json()["id"]
+
+    older = _seed_job(client, sid)
+    newer = _seed_job(client, sid, status="failed")
+    _seed_job(client, other_sid)   # must not leak into sid's history
+
+    r = client.get(f"/api/v1/schedules/{sid}/runs", headers=h)
+    assert r.status_code == 200
+    ids = [j["id"] for j in r.json()]
+    assert ids == [newer, older]
+
+
+def test_runs_excludes_jobs_older_than_the_30_day_window(
+        client, csrf_header, bootstrap_admin):
+    h = _admin(client, csrf_header, bootstrap_admin)
+    sid = _create(client, h).json()["id"]
+
+    stale = _seed_job(client, sid, created_at=utcnow() - timedelta(days=31))
+    recent = _seed_job(client, sid)
+
+    ids = [j["id"] for j in client.get(f"/api/v1/schedules/{sid}/runs", headers=h).json()]
+    assert ids == [recent]
+    assert stale not in ids
+
+
+def test_runs_404s_on_an_unknown_schedule(client, csrf_header, bootstrap_admin):
+    h = _admin(client, csrf_header, bootstrap_admin)
+    assert client.get("/api/v1/schedules/9999/runs", headers=h).status_code == 404

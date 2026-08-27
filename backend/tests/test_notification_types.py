@@ -64,9 +64,18 @@ def test_system_schedule_kinds_are_housekeeping():
     assert type_for_job("metrics.maintain", "failed") == "housekeeping.failed"
 
 
-def test_registry_is_nineteen_rows_with_unique_keys_and_human_labels():
-    assert len(TYPES) == 19
-    assert len({t.key for t in TYPES}) == 19
+@pytest.mark.parametrize("kind", ["sessions.cleanup", "jobs.prune",
+                                  "db.compact", "update.check"])
+def test_new_maintenance_kinds_are_housekeeping_not_generic(kind):
+    """An unmapped kind would fall through to job.succeeded/job.failed and
+    notify on every nightly run, whatever its default_on setting."""
+    assert type_for_job(kind, "succeeded") == "housekeeping.succeeded"
+    assert type_for_job(kind, "failed") == "housekeeping.failed"
+
+
+def test_registry_is_twenty_rows_with_unique_keys_and_human_labels():
+    assert len(TYPES) == 20
+    assert len({t.key for t in TYPES}) == 20
     assert set(DEFAULTS) == set(BY_KEY)
     for t in TYPES:
         # A label is what an operator reads. Backend spelling never leaks.

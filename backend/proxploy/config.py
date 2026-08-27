@@ -79,7 +79,7 @@ class Settings(BaseSettings):
     # clone can run unnoticed. Configurable rather than scattered through the
     # code because the right value depends on how tolerant of an outage the
     # deployment needs to be.
-    license_heartbeat_interval_s: float = 21600.0   # 6h, token exp is 72h
+    license_heartbeat_interval_s: float = 3600.0    # 1h, token exp is 72h
     # After this long without reaching the service, refuse to keep renewing
     # on the cached token alone. Well beyond grace_until, so it only bites an
     # install that has been unreachable for a season, which is the backstop

@@ -115,7 +115,7 @@ describe('VmTable', () => {
       const { unmount } = wrap([{ ...VM, os_type }])
       const row = rowFor('win11')
       expect(within(row).queryByRole('img')).toBeNull()
-      expect(within(row).getByText('WI')).toBeInTheDocument()
+      expect(within(row).getByText('WIN')).toBeInTheDocument()
       unmount()
     }
   })

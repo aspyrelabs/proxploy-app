@@ -120,6 +120,14 @@ describe('actionLabel', () => {
   })
 })
 
+it('names the four new job kinds rather than title-casing the raw identifier', () => {
+  expect(actionLabel('sessions.cleanup')).toBe('Sign-in Cleanup')
+  expect(actionLabel('jobs.prune')).toBe('History Cleanup')
+  expect(actionLabel('db.compact')).toBe('Database Compact')
+  expect(actionLabel('update.check')).toBe('Update Check')
+  expect(actionLabel('db.compact')).not.toBe('Db Compact')
+})
+
 // Both lookups are plain object literals, so an identifier that collides with
 // something on Object.prototype must not be answered with that.
 it('does not answer prototype keys out of either lookup table', () => {

@@ -380,11 +380,18 @@ describe('BackupsPage', () => {
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
     wrap()
     await screen.findByText('Immich')
-    fireEvent.click(screen.getAllByRole('button', { name: 'Delete' })[0])
+    const rows = screen.getAllByRole('row')
+    const immich = rows.find((r) => within(r).queryByText('Immich'))!
+    const openMenu = () =>
+      fireEvent.pointerDown(within(immich).getByRole('button', { name: /More actions/i }),
+                            { button: 0, ctrlKey: false })
+    openMenu()
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Delete' }))
     expect(confirmSpy).toHaveBeenCalled()
     expect(calls.length).toBe(0)          // declining deletes nothing
     confirmSpy.mockReturnValue(true)
-    fireEvent.click(screen.getAllByRole('button', { name: 'Delete' })[0])
+    openMenu()
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Delete' }))
     await waitFor(() => expect(calls.length).toBe(1))
     expect(calls[0].method).toBe('DELETE')
     expect(calls[0].path).toBe('/backups/11')
@@ -433,9 +440,14 @@ describe('BackupsPage', () => {
     calls.length = 0
     features = { 'backups.pbs': true, 'backups.run': true, 'backups.restore': true }
     wrap()
-    const btn = (await screen.findAllByRole('button', { name: 'Delete' }))[0]
-    expect(btn).toBeDisabled()
-    expect(btn.getAttribute('title')).toMatch(/not included in your plan/i)
+    await screen.findByText('Immich')
+    const rows = screen.getAllByRole('row')
+    const immich = rows.find((r) => within(r).queryByText('Immich'))!
+    fireEvent.pointerDown(within(immich).getByRole('button', { name: /More actions/i }),
+                          { button: 0, ctrlKey: false })
+    const del = await screen.findByRole('menuitem', { name: 'Delete' })
+    await waitFor(() => expect(del).toHaveAttribute('data-disabled'))
+    expect(del.getAttribute('title')).toMatch(/not included in your plan/i)
   })
 
   it('veils the retention preview without backups.retention, and marks volumes when entitled', async () => {
@@ -515,12 +527,15 @@ describe('BackupsPage', () => {
     await screen.findByText('pbs-guest')
     const rows = screen.getAllByRole('row')
     const pbs = rows.find((r) => within(r).queryByText('pbs-guest'))!
-    for (const name of ['Verify', 'Test restore']) {
-      const btn = within(pbs).getByRole('button', { name })
-      expect(btn).toBeDisabled()
-      expect(btn).toHaveAttribute('title', expect.stringContaining('Proxmox Backup Server'))
-    }
-    fireEvent.click(within(pbs).getByRole('button', { name: 'Verify' }))
+    const verifyBtn = within(pbs).getByRole('button', { name: 'Verify' })
+    expect(verifyBtn).toBeDisabled()
+    expect(verifyBtn).toHaveAttribute('title', expect.stringContaining('Proxmox Backup Server'))
+    fireEvent.pointerDown(within(pbs).getByRole('button', { name: /More actions/i }),
+                          { button: 0, ctrlKey: false })
+    const testRestoreItem = await screen.findByRole('menuitem', { name: 'Test restore' })
+    expect(testRestoreItem).toHaveAttribute('data-disabled')
+    expect(testRestoreItem).toHaveAttribute('title', expect.stringContaining('Proxmox Backup Server'))
+    fireEvent.click(verifyBtn)
     expect(calls.length).toBe(0)
   })
 
@@ -530,7 +545,9 @@ describe('BackupsPage', () => {
     await screen.findByText('pbs-guest')
     const rows = screen.getAllByRole('row')
     const win11 = rows.find((r) => within(r).queryByText('win11'))!
-    fireEvent.click(within(win11).getByRole('button', { name: 'Test restore' }))
+    fireEvent.pointerDown(within(win11).getByRole('button', { name: /More actions/i }),
+                          { button: 0, ctrlKey: false })
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Test restore' }))
     await waitFor(() => expect(calls.length).toBe(1))
     expect(calls[0].path).toBe('/backups/12/test-restore')
     expect(calls[0].body).toEqual({ storage: null })

@@ -1,4 +1,5 @@
 import { Fragment, useState } from 'react'
+import type { ReactNode } from 'react'
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { Link, createRoute, useSearch } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -7,10 +8,13 @@ import { api, apiErrorDetail } from '../api/client'
 import { notify } from '../lib/notify'
 import { useEntitlements } from '../api/hooks'
 import { LicenseCard } from '../components/LicenseCard'
-import { useSchedules } from '../api/schedules'
-import { actionLabel } from '../lib/activityDisplay'
+import { BACKUP_KINDS, useSchedules } from '../api/schedules'
+import { actionLabel, statusLabel } from '../lib/activityDisplay'
 import type { ScheduleRow } from '../api/schedules'
-import { SIX_COL, TablePager, usePaged } from '../components/TablePager'
+import { SCHED_COL, TABLE_MIN, TABLE_SCROLL, TablePager, usePaged } from '../components/TablePager'
+import { ButtonGroup, ButtonGroupSeparator } from '../components/ui/button-group'
+import { RowActionsMenu } from '../components/ui/row-actions'
+import { ScheduleRunsDialog } from '../components/ScheduleRunsDialog'
 import { ChannelForm } from '../components/ChannelForm'
 import { ChannelEditForm } from '../components/ChannelEditForm'
 import { EventsMatrix } from '../components/EventsMatrix'
@@ -110,8 +114,9 @@ function Card({ title, children, action }: { title: string; children: React.Reac
  *  from an Async render prop. Ten to a page, same six column widths as
  *  the Recent backups table. */
 function ScheduleTable({ rows, editing, setEditing, setAdding, windowsAllowed,
-                        remove, runNow, toggle }: {
+                        remove, runNow, toggle, renderEdit }: {
   rows: ScheduleRow[]
+  renderEdit: (s: ScheduleRow) => ReactNode
   editing: ScheduleRow | null
   setEditing: (f: (e: ScheduleRow | null) => ScheduleRow | null) => void
   setAdding: (v: boolean) => void
@@ -121,16 +126,19 @@ function ScheduleTable({ rows, editing, setEditing, setAdding, windowsAllowed,
   toggle: { mutate: (s: ScheduleRow) => void; isPending: boolean }
 }) {
   const paged = usePaged(rows)
+  const [viewingRuns, setViewingRuns] = useState<ScheduleRow | null>(null)
   return (
     <>
-                <table className="w-full table-fixed text-left text-[13px]">
-            {SIX_COL}
+                <div className={TABLE_SCROLL}>
+            <table className={`w-full ${TABLE_MIN} table-fixed text-left text-[13px] [&_td]:pr-4 [&_th]:pr-4`}>
+            {SCHED_COL}
             <thead><tr className="text-[10.5px] uppercase tracking-wide text-text-3">
               <th className="pb-2">Name</th><th>Runs</th><th>Cron</th><th>Next</th>
-              <th>State</th><th /></tr></thead>
+              <th>State</th><th>Status</th><th /></tr></thead>
             <tbody>
               {paged.rows.map((s: ScheduleRow) => (
-                <tr key={s.id} className="border-t border-line-soft hover:bg-panel-2">
+                <Fragment key={s.id}>
+                <tr className="border-t border-line-soft hover:bg-panel-2">
                   <td className="truncate py-2" title={s.name}>
                     {s.name}
                     {s.created_by == null && (
@@ -154,51 +162,90 @@ function ScheduleTable({ rows, editing, setEditing, setAdding, windowsAllowed,
                   <td className="truncate font-mono text-[12px] text-text-2"
                       title={s.cron}>{s.cron}</td>
                   <td className="font-mono text-[11.5px] text-text-3">
-                    {s.next_run_at ? new Date(s.next_run_at).toLocaleString() : 'unknown'}
-                    <span className="ml-1">{s.timezone}</span>
+                    {s.next_run_at ? (
+                      <>
+                        {new Date(s.next_run_at).toLocaleString()}
+                        <span className="ml-1">{s.timezone}</span>
+                      </>
+                    ) : 'not scheduled'}
                   </td>
-                  <td className={s.enabled ? 'text-green' : 'text-text-3'}>
+                  <td className={`truncate ${s.enabled ? 'text-green' : 'text-text-3'}`}>
                     {s.enabled ? 'enabled' : 'disabled'}
                   </td>
-                  <td className="whitespace-nowrap py-2 text-right">
-                    {windowsAllowed && (
+                  <td className={`truncate ${s.last_run == null ? 'text-text-3'
+                      : s.last_run.status === 'succeeded' ? 'text-green'
+                      : s.last_run.status === 'failed' ? 'text-red' : 'text-text-3'}`}
+                      title={s.last_run?.status === 'failed' ? (s.last_run.error ?? undefined) : undefined}>
+                    {s.last_run == null ? 'Never run' : statusLabel(s.last_run.status)}
+                  </td>
+                  <td className="py-2 text-right">
+                    <ButtonGroup>
+                      {windowsAllowed && (
+                        <>
+                          <Button size="sm" variant="ghost"
+                                  disabled={runNow.isPending}
+                                  onClick={() => runNow.mutate(s.id)}>Run now</Button>
+                          <ButtonGroupSeparator />
+                        </>
+                      )}
                       <Button size="sm" variant="ghost"
-                              disabled={runNow.isPending}
-                              onClick={() => runNow.mutate(s.id)}>Run now</Button>
-                    )}
-                    <Button size="sm" variant="ghost" className="ml-2"
-                            disabled={toggle.isPending}
-                            onClick={() => toggle.mutate(s)}>
-                      {s.enabled ? 'Disable' : 'Enable'}
-                    </Button>
-                    {windowsAllowed && (
-                      <Button size="sm" variant="ghost" className="ml-2"
-                              onClick={() => {
-                                setAdding(false)
-                                setEditing((e) => (e?.id === s.id ? null : s))
-                              }}>
-                        {editing?.id === s.id ? 'Close' : 'Edit'}
-                      </Button>
-                    )}
-                    <Button size="sm" variant="danger" className="ml-2"
-                            onClick={() => {
+                              onClick={() => setViewingRuns(s)}>Logs</Button>
+                      <ButtonGroupSeparator />
+                      <RowActionsMenu label={`More actions for ${s.name}`}
+                        actions={[
+                          { label: s.enabled ? 'Disable' : 'Enable',
+                            icon: s.enabled ? 'pause' : 'play_arrow',
+                            disabled: toggle.isPending,
+                            onSelect: () => toggle.mutate(s) },
+                          ...(windowsAllowed ? [{
+                            label: editing?.id === s.id ? 'Close editor' : 'Edit',
+                            icon: 'edit',
+                            onSelect: () => {
+                              setAdding(false)
+                              setEditing((e) => (e?.id === s.id ? null : s))
+                            },
+                          }] : []),
+                          { label: 'Remove', icon: 'delete', destructive: true,
+                            onSelect: () => {
                               if (window.confirm(`Remove schedule "${s.name}"?`)) {
                                 remove.mutate(s.id)
                               }
-                            }}>Remove</Button>
+                            } },
+                        ]} />
+                    </ButtonGroup>
                   </td>
                 </tr>
+                <tr>
+                  <td colSpan={7} className="p-0">
+                    <div className={`grid transition-[grid-template-rows] duration-200 ease-out
+                                     motion-reduce:transition-none ${editing?.id === s.id
+                                       ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
+                      <div className="overflow-hidden">
+                        {editing?.id === s.id && (
+                          <div className="border-t border-line-soft px-1 py-4">
+                            {renderEdit(s)}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </td>
+                </tr>
+                </Fragment>
               ))}
             </tbody>
           </table>
+          </div>
       <TablePager page={paged.page} pages={paged.pages} onPage={paged.setPage}
                   label="Scheduled jobs pages" />
+      {viewingRuns && (
+        <ScheduleRunsDialog schedule={viewingRuns} onClose={() => setViewingRuns(null)} />
+      )}
     </>
   )
 }
 
-export function SchedulesCard({ only, title = 'Schedules', canAdd = true }:
-  { only?: string[]; title?: string; canAdd?: boolean } = {}) {
+export function SchedulesCard({ only, exclude, title = 'Schedules', canAdd = true }:
+  { only?: string[]; exclude?: string[]; title?: string; canAdd?: boolean } = {}) {
   const qc = useQueryClient()
   const ent = useEntitlements()
   const schedules = useSchedules()
@@ -218,7 +265,7 @@ export function SchedulesCard({ only, title = 'Schedules', canAdd = true }:
   })
   const runNow = useMutation({
     mutationFn: (id: number) => api(`/schedules/${id}/run`, { method: 'POST' }),
-    onSuccess: () => notify.success('Started, follow it on the Hosts page.'),
+    onSuccess: () => notify.success('Started. Track its progress in notifications.'),
     onError: () => notify.error('Could not start that job, try again.'),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ['schedules'] })
@@ -238,7 +285,7 @@ export function SchedulesCard({ only, title = 'Schedules', canAdd = true }:
           action={canAdd && windowsAllowed && (
             <Button variant="ghost"
                     onClick={() => { setEditing(null); setAdding(a => !a) }}>
-              {adding ? 'Close' : 'New schedule'}
+              {adding ? 'Close' : 'New job'}
             </Button>
           )}>
       <QueryState query={schedules}
@@ -247,30 +294,39 @@ export function SchedulesCard({ only, title = 'Schedules', canAdd = true }:
                     <SkeletonTable rows={3} cols={['w-28', 'w-24', 'w-20', 'w-36', 'w-16', 'w-28']} />
                   </SkeletonGroup>}
                   emptyTitle="No schedules yet"
-                  emptyNote="Add one for nightly backups or an auto-update window."
+                  emptyNote="Add one to refresh the app catalog or roll up metrics on a schedule."
                   errorTitle="Schedules not readable"
                   errorNote="Proxploy could not reach the backend to list your schedules.">
         {(all) => {
-          const rows = only ? all.filter((s) => only.includes(s.job_kind)) : all
+          const rows = only
+            ? all.filter((s) => only.includes(s.job_kind))
+            : exclude
+              ? all.filter((s) => !exclude.includes(s.job_kind))
+              : all
           return rows.length === 0 ? (
             <p className="text-[12.5px] text-text-3">
-              No scheduled jobs yet, &quot;{canAdd ? 'New schedule' : 'New job'}&quot;
+              No scheduled jobs yet, &quot;New job&quot;
               {' '}creates one.
             </p>
           ) : (
 <ScheduleTable rows={rows} editing={editing} setEditing={setEditing}
                          setAdding={setAdding} windowsAllowed={windowsAllowed}
-                         remove={remove} runNow={runNow} toggle={toggle} />
+                         remove={remove} runNow={runNow} toggle={toggle}
+                         renderEdit={(s) => (
+                           <ScheduleForm key={s.id} existing={s} exclude={exclude}
+                                         onSaved={() => { setAdding(false); setEditing(null) }}
+                                         onCancel={() => setEditing(null)} />
+                         )} />
           )
         }}
       </QueryState>
-      {(adding || editing) && (
+      {adding && (
         <div className="mt-4 border-t border-line-soft pt-4">
-          {/* Keyed on the row so switching straight from one Edit to another
-              rebuilds the fields instead of keeping the first row's state. */}
-          <ScheduleForm key={editing?.id ?? 'new'} existing={editing ?? undefined}
+          <ScheduleForm key="new"
                         jobKind={only?.length === 1 ? only[0] : undefined}
-                        onSaved={() => { setAdding(false); setEditing(null) }} />
+                        exclude={exclude}
+                        onSaved={() => { setAdding(false); setEditing(null) }}
+                        onCancel={() => setAdding(false)} />
         </div>
       )}
     </Card>
@@ -734,7 +790,7 @@ export function SettingsPage() {
         <EventsMatrix />
       </Card>}
 
-      {active === 'schedules' && <SchedulesCard />}
+      {active === 'maintenance' && <SchedulesCard exclude={BACKUP_KINDS} title="Maintenance" />}
 
       {active === 'teams' && <TeamsCard />}
 

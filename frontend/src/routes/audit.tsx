@@ -13,6 +13,7 @@ import { LockVeil } from '../components/LockVeil'
 import { actionLabel, statusLabel } from '../lib/activityDisplay'
 import { QueryState } from '../components/QueryState'
 import { Button } from '../components/ui/button'
+import { ButtonGroup, ButtonGroupSeparator } from '../components/ui/button-group'
 import {
   Pagination, PaginationContent, PaginationItem, PaginationNext, PaginationPrevious,
 } from '../components/ui/pagination'
@@ -165,14 +166,16 @@ export function AuditPage() {
                   value={filters.to ?? ''} onChange={(e) => setFilter('to', e.target.value)} />
               </div>
             </div>
-            <div className="flex gap-2">
+            <ButtonGroup>
               <Button variant="ghost" onClick={() => download('csv')}>Export CSV</Button>
+              <ButtonGroupSeparator />
               <Button variant="ghost" onClick={() => download('jsonl')}>Export JSONL</Button>
+              <ButtonGroupSeparator />
               <Button variant="danger" disabled={clear.isPending}
                       onClick={() => { setClearNote(''); setClearOpen(true) }}>
                 Clear log…
               </Button>
-            </div>
+            </ButtonGroup>
           </div>
 
           {clearNote && <p className="mb-4 text-[12.5px] text-text-2">{clearNote}</p>}

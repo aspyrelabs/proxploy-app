@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from '@tanstack/react-router'
 import * as Tooltip from '@radix-ui/react-tooltip'
 import { Icon } from './ui/icon'
@@ -25,12 +25,24 @@ export const NAV = [
   ]},
 ] as const
 
+const NARROW = '(max-width: 1439px)'
+
 export function SidebarNav() {
-  const [collapsed, setCollapsed] = useState(readSidebarCollapsed)
+  const [chosen, setChosen] = useState(readSidebarCollapsed)
+  const [narrow, setNarrow] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia(NARROW).matches)
+  useEffect(() => {
+    const mq = window.matchMedia(NARROW)
+    const on = () => setNarrow(mq.matches)
+    on()
+    mq.addEventListener('change', on)
+    return () => mq.removeEventListener('change', on)
+  }, [])
+  const collapsed = chosen || narrow
   const toggle = () => {
     const next = !collapsed
     setSidebarCollapsed(next)
-    setCollapsed(next)
+    setChosen(next)
   }
   return (
     <Tooltip.Provider delayDuration={200}>
@@ -58,13 +70,15 @@ export function SidebarNav() {
             py-[3px], not py-2.5: the 32px hit target holds an 18px glyph
             (7px around it), so 3px more gives the glyph 10px and keeps the
             button big enough to hit. */}
-        <div className={`flex border-t border-line-soft px-2 py-[3px] ${collapsed ? 'justify-center' : 'justify-end'}`}>
-          <button type="button" onClick={toggle}
-            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            className="grid h-8 w-8 place-items-center rounded-tile text-text-3 hover:bg-panel-2 hover:text-text">
-            <Icon name={collapsed ? 'keyboard_double_arrow_right' : 'keyboard_double_arrow_left'} />
-          </button>
-        </div>
+        {!narrow && (
+          <div className={`flex border-t border-line-soft px-2 py-[3px] ${collapsed ? 'justify-center' : 'justify-end'}`}>
+            <button type="button" onClick={toggle}
+              aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              className="grid h-8 w-8 place-items-center rounded-tile text-text-3 hover:bg-panel-2 hover:text-text">
+              <Icon name={collapsed ? 'keyboard_double_arrow_right' : 'keyboard_double_arrow_left'} />
+            </button>
+          </div>
+        )}
       </aside>
     </Tooltip.Provider>
   )

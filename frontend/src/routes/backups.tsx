@@ -10,7 +10,9 @@ import { useBackups, useDeleteBackup, usePrune, usePrunePreview, useRunBackup,
          useTestRestore, useVerifyBackup, useVerifySweep } from '../api/backups'
 import type { BackupRow, BackupsResponse, PruneParams } from '../api/backups'
 import { useRunningJobOfKind } from '../api/jobs'
-import { SIX_COL, TablePager, usePaged } from '../components/TablePager'
+import { SIX_COL, TABLE_MIN, TABLE_SCROLL, TablePager, usePaged } from '../components/TablePager'
+import { ButtonGroup, ButtonGroupSeparator } from '../components/ui/button-group'
+import { RowActionsMenu } from '../components/ui/row-actions'
 import { useSchedules } from '../api/schedules'
 import { useStorage } from '../api/storage'
 import { BackupLimitsDialog, limitsAcknowledged } from '../components/BackupLimitsDialog'
@@ -21,6 +23,7 @@ import { RestoreDialog } from '../components/RestoreDialog'
 import { ScheduleForm } from '../components/ScheduleForm'
 // From the route, not a copy: SchedulesCard owns the row actions.
 import { SchedulesCard } from './settings'
+import { BACKUP_KINDS } from '../api/schedules'
 import { StorageForm } from '../components/StorageForm'
 import { UsageBar, STORAGE_GRADIENT } from '../components/UsageBar'
 import { Button } from '../components/ui/button'
@@ -250,7 +253,7 @@ function RunDialog({ onClose }: { onClose: () => void }) {
 /** "New job" → a backup.run schedule, in the same dialog shell as RunDialog. */
 function ScheduleDialog({ onClose }: { onClose: () => void }) {
   return (
-    <Dialog title={'New scheduled backup job'} width={480} onClose={onClose}>
+    <Dialog title={'New scheduled backup job'} width={480} scrollBody onClose={onClose}>
     {/* Same sentence as RunDialog: "backup" on its own reads as
             unqualified. No longer promises "every" guest: the form below
             picks which. */}
@@ -593,7 +596,7 @@ export function BackupsPage() {
       <div className="mt-4">
         {/* Both kinds this page can CREATE. It filtered to backup.run alone,
                     so the verify-only job was invisible on the page that saved it. */}
-        <SchedulesCard only={['backup.run', 'backup.verify']} title="Scheduled jobs"
+        <SchedulesCard only={BACKUP_KINDS} title="Scheduled jobs"
                        canAdd={false} />
       </div>
 
@@ -614,7 +617,8 @@ export function BackupsPage() {
             note="Archives Proxmox already holds appear here after the first sync." />
         ) : (
           <>
-          <table className="w-full table-fixed text-left text-[13px]">
+          <div className={TABLE_SCROLL}>
+          <table className={`w-full ${TABLE_MIN} table-fixed text-left text-[13px] [&_td]:pr-4 [&_th]:pr-4`}>
             {SIX_COL}
             <thead>
               <tr className="text-[11px] uppercase text-text-3">
@@ -647,46 +651,50 @@ export function BackupsPage() {
                     {b.verify_state === 'ok' ? 'verified'
                       : b.verify_state === 'failed' ? 'failed' : 'unverified'}
                   </td>
-                  <td className="whitespace-nowrap py-2.5 text-right">
-                    <Button variant="ghost" size="sm"
-                            disabled={verify.isPending || pbsOwned(b)}
-                            title={pbsOwned(b)
+                  <td className="py-2.5 text-right">
+                    <ButtonGroup>
+                      <Button variant="ghost" size="sm"
+                              disabled={verify.isPending || pbsOwned(b)}
+                              title={pbsOwned(b)
+                                ? 'Proxmox Backup Server checks this archive itself'
+                                : 'Read the archive back and check it is intact'}
+                              onClick={() => verify.mutate(b.id, {
+                                onError: (e) => notify.error(
+                                  apiErrorDetail(e, 'Could not start that check, try again.')),
+                              })}>
+                        Verify
+                      </Button>
+                      <ButtonGroupSeparator />
+                      <Button variant="ghost" size="sm"
+                              disabled={restoreDenied}
+                              title={restoreDenied ? 'Not included in your plan' : undefined}
+                              onClick={() => setRestoring(b)}>
+                        Restore
+                      </Button>
+                      <ButtonGroupSeparator />
+                      <RowActionsMenu label={`More actions for ${b.guest_name ?? 'this backup'}`}
+                        actions={[
+                          { label: 'Test restore', icon: 'restart_alt',
+                            disabled: testRestore.isPending || pbsOwned(b),
+                            title: pbsOwned(b)
                               ? 'Proxmox Backup Server checks this archive itself'
-                              : 'Read the archive back and check it is intact'}
-                            onClick={() => verify.mutate(b.id, {
-                              onError: (e) => notify.error(
-                                apiErrorDetail(e, 'Could not start that check, try again.')),
-                            })}>
-                      Verify
-                    </Button>
-                    <Button variant="ghost" size="sm" className="ml-2"
-                            disabled={testRestore.isPending || pbsOwned(b)}
-                            title={pbsOwned(b)
-                              ? 'Proxmox Backup Server checks this archive itself'
-                              : 'Restore into a throwaway id, then delete it'}
-                            onClick={() => testRestore.mutate({ id: b.id }, {
+                              : 'Restore into a throwaway id, then delete it',
+                            onSelect: () => testRestore.mutate({ id: b.id }, {
                               onError: (e) => notify.error(
                                 apiErrorDetail(e, 'Could not start that test restore, try again.')),
-                            })}>
-                      Test restore
-                    </Button>
-                    <Button variant="ghost" size="sm" className="ml-2"
-                            disabled={restoreDenied}
-                            title={restoreDenied ? 'Not included in your plan' : undefined}
-                            onClick={() => setRestoring(b)}>
-                      Restore
-                    </Button>
-                    <Button variant="danger" size="sm" className="ml-2"
-                            disabled={deleteDenied}
-                            title={deleteDenied ? 'Not included in your plan' : undefined}
-                            onClick={() => drop(b)}>
-                      Delete
-                    </Button>
+                            }) },
+                          { label: 'Delete', icon: 'delete', destructive: true,
+                            disabled: deleteDenied,
+                            title: deleteDenied ? 'Not included in your plan' : undefined,
+                            onSelect: () => drop(b) },
+                        ]} />
+                    </ButtonGroup>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+          </div>
           <TablePager page={paged.page} pages={paged.pages} onPage={paged.setPage}
                       label="Recent backups pages" />
           </>

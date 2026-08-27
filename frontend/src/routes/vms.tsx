@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { createRoute, useNavigate, useSearch } from '@tanstack/react-router'
 import { useState } from 'react'
 import { api } from '../api/client'
@@ -6,23 +6,43 @@ import type { VmRow } from '../api/hooks'
 import { useEntitlements } from '../api/hooks'
 import { QueryState } from '../components/QueryState'
 import { SkeletonGroup } from '../components/ui/skeleton'
-import { Button } from '../components/ui/button'
+import { Button, segment } from '../components/ui/button'
 import { VmCreateWizard } from '../components/VmCreateWizard'
 import { VmTable, VmTableSkeleton } from '../components/VmTable'
 import { TableSorter, useSorted } from '../components/TableSorter'
 
+type HostRow = { id: number; name: string }
+
+const inputCls = 'rounded-ctl border border-line bg-panel px-3 py-1.5 text-[13px] text-text placeholder:text-text-3 focus:outline-none focus:ring-1 focus:ring-amber'
+
 export function VmsPage() {
-  const search = useSearch({ strict: false }) as { open?: number }
+  const search = useSearch({ strict: false }) as { host?: number; q?: string; open?: number }
   const navigate = useNavigate()
   const ent = useEntitlements()
   const [creating, setCreating] = useState(false)
+  const hostsQuery = useQuery({
+    queryKey: ['hosts'],
+    queryFn: () => api<HostRow[]>('/hosts'),
+  })
+  const hosts = hostsQuery.data
   const vmsQuery = useQuery({
-    queryKey: ['vms', {}],
-    queryFn: () => api<VmRow[]>('/vms'),
+    placeholderData: keepPreviousData,
+    queryKey: ['vms', { host: search.host }],
+    queryFn: () => api<VmRow[]>(
+      search.host != null ? `/vms?host=${search.host}` : '/vms'),
     refetchInterval: 30_000,
   })
-  const vms = vmsQuery.data
+  const needle = (search.q ?? '').trim().toLowerCase()
+  const vms = needle
+    ? vmsQuery.data?.filter((v) =>
+        v.name.toLowerCase().includes(needle)
+        || String(v.vmid).includes(needle)
+        || v.host_name.toLowerCase().includes(needle))
+    : vmsQuery.data
   const running = vms?.filter((v) => v.status === 'running').length ?? 0
+
+  const setSearch = (patch: Partial<{ host?: number; q?: string; open?: number }>) =>
+    navigate({ to: '/vms' as never, search: { ...search, ...patch } as never, replace: true })
   // Client-side, on rows the query already holds (usePaged precedent on
   // /backups). Not in the URL beside `open`: that names a VM someone can be
   // sent to, this is only which order the rows are stacked in.
@@ -40,13 +60,48 @@ export function VmsPage() {
           </div>
         </div>
         <div className="ml-auto flex items-center gap-3">
-          <TableSorter sort={sorted.sort} onSort={sorted.setSort}
-                       label="virtual machines" />
           <Button disabled={createDenied}
             title={createDenied ? 'Not included in your plan' : undefined}
             onClick={() => setCreating(true)}>
             New VM
           </Button>
+        </div>
+      </div>
+      <div className="mb-4 flex items-center gap-3">
+        <div className="flex overflow-hidden rounded-ctl border border-line">
+          <button
+            className={`px-3 py-1.5 text-[12px] ${segment(search.host == null)}`}
+            onClick={() => setSearch({ host: undefined })}
+          >
+            All hosts
+          </button>
+          {(hosts ?? []).map((h) => (
+            <button
+              key={h.id}
+              className={`border-l border-line px-3 py-1.5 text-[12px] ${segment(search.host === h.id)}`}
+              onClick={() => setSearch({ host: h.id })}
+            >
+              {h.name}
+            </button>
+          ))}
+          {hostsQuery.isError && (
+            <span className="border-l border-line px-3 py-1.5 text-[12px] text-red">
+              Could not load hosts
+            </span>
+          )}
+        </div>
+        <input
+          className={inputCls}
+          placeholder="Filter virtual machines…"
+          defaultValue={search.q ?? ''}
+          onChange={(e) => setSearch({ q: e.target.value || undefined })}
+        />
+        <span className="rounded-full bg-panel-2 px-2 py-0.5 font-mono text-[11px] text-text-2">
+          {vms?.length ?? 0} shown
+        </span>
+        <div className="ml-auto">
+          <TableSorter sort={sorted.sort} onSort={sorted.setSort}
+                       label="virtual machines" />
         </div>
       </div>
       <QueryState query={vmsQuery}
@@ -60,12 +115,18 @@ export function VmsPage() {
         {/* `open` lives in the URL so /vms?open=9 deep-links onto that VM.
             Pass the sorted rows, not the raw ones: QueryState still owns
             loading/error/empty, just not the order. */}
-        {() => <VmTable vms={sorted.rows} open={search.open}
-                        onOpen={(open) => navigate({
-                          to: '/vms' as never,
-                          search: { ...search, open } as never,
-                          replace: true,
-                        })} />}
+        {() => sorted.rows.length === 0 ? (
+          <p className="text-[12.5px] text-text-3">
+            No virtual machines match your filter.
+          </p>
+        ) : (
+          <VmTable vms={sorted.rows} open={search.open}
+                   onOpen={(open) => navigate({
+                     to: '/vms' as never,
+                     search: { ...search, open } as never,
+                     replace: true,
+                   })} />
+        )}
       </QueryState>
       {creating && <VmCreateWizard onClose={() => setCreating(false)} />}
     </div>

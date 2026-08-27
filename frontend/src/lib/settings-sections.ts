@@ -22,8 +22,9 @@ export const SETTINGS_SECTIONS: { group: string; items: SettingsSection[] }[] = 
   { group: 'General', items: [
     { id: 'hosts', label: 'Hosts',
       keywords: ['node', 'proxmox', 'enrol', 'enroll', 'add host', 'node shell'] },
-    { id: 'schedules', label: 'Schedules',
-      keywords: ['cron', 'timer', 'scheduled job', 'recurring'] },
+    { id: 'maintenance', label: 'Maintenance',
+      keywords: ['cron', 'timer', 'scheduled job', 'schedules', 'recurring',
+                 'maintenance', 'catalog refresh', 'metrics'] },
     { id: 'teams', label: 'Teams',
       keywords: ['rbac', 'role', 'permission', 'member'] },
     { id: 'users', label: 'Users',

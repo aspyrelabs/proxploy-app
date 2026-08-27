@@ -8,8 +8,11 @@ discovering a bad cron when the schedule silently disables itself later.
 """
 from __future__ import annotations
 
+from datetime import timedelta
+
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
+from sqlalchemy import func
 
 from proxploy.api.deps import authorize, get_db, require_entitlement
 from proxploy.api.jobs import job_out
@@ -31,6 +34,9 @@ _manage = authorize("schedule", "manage")
 # on the payload's job_kind, which a dependency cannot see.
 AUTO_UPDATE_KIND = "app.update"
 
+RUNS_WINDOW_DAYS = 30
+RUNS_MAX = 200
+
 
 class ScheduleIn(BaseModel):
     name: str
@@ -50,11 +56,17 @@ class SchedulePatch(BaseModel):
     enabled: bool | None = None
 
 
-def _out(s: Schedule) -> dict:
+def _out(s: Schedule, last: Job | None = None) -> dict:
     return {"id": s.id, "name": s.name, "job_kind": s.job_kind, "cron": s.cron,
             "timezone": s.timezone, "params": s.params or {},
             "enabled": s.enabled, "created_by": s.created_by,
-            "last_run_at": to_iso(s.last_run_at), "next_run_at": to_iso(s.next_run_at)}
+            "last_run_at": to_iso(s.last_run_at), "next_run_at": to_iso(s.next_run_at),
+            "last_run": None if last is None else {
+                "job_id": last.id, "status": last.status, "error": last.error,
+                "started_at": to_iso(last.started_at),
+                "finished_at": to_iso(last.finished_at),
+                "created_at": to_iso(last.created_at),
+            }}
 
 
 def _ip(request: Request) -> str | None:
@@ -91,7 +103,20 @@ def _validated(cron: str, tz: str, job_kind: str) -> None:
 def list_schedules(db=Depends(get_db), user: User = Depends(_read)):
     # Ascending: a small admin-curated config list, where stable ordering
     # matters more than surfacing new rows (unlike /jobs' append-only log).
-    return [_out(s) for s in db.query(Schedule).order_by(Schedule.id).all()]
+    rows = db.query(Schedule).order_by(Schedule.id).all()
+
+    ids = [s.id for s in rows]
+    latest_ids = dict(
+        db.query(Job.schedule_id, func.max(Job.id))
+        .filter(Job.schedule_id.in_(ids))
+        .group_by(Job.schedule_id).all()
+    ) if ids else {}
+    last_jobs = {
+        j.schedule_id: j
+        for j in db.query(Job).filter(Job.id.in_(latest_ids.values())).all()
+    } if latest_ids else {}
+
+    return [_out(s, last_jobs.get(s.id)) for s in rows]
 
 
 @router.post("", status_code=201,
@@ -203,3 +228,22 @@ def run_schedule_now(request: Request, schedule_id: int, db=Depends(get_db),
                 params={"name": row.name, "job_kind": row.job_kind},
                 ip=_ip(request))
     return {"job": job_out(job)}
+
+
+@router.get("/{schedule_id}/runs", dependencies=[Depends(_read)])
+def schedule_runs(schedule_id: int, db=Depends(get_db), user: User = Depends(_read)):
+    """A read of the shared `jobs` table, windowed to this schedule for the
+    Schedules table's Logs button. Nothing is deleted here, so the global
+    Jobs history is unaffected; this only narrows what one page shows.
+
+    Uses `_read`, the same permission as the list route, not the jobs.history
+    entitlement: this button lives on the Schedules table and must not be
+    gated behind a different feature flag than the rest of that page.
+    """
+    _get(db, schedule_id)
+    cutoff = utcnow() - timedelta(days=RUNS_WINDOW_DAYS)
+    rows = (db.query(Job)
+            .filter(Job.schedule_id == schedule_id, Job.created_at >= cutoff)
+            .order_by(Job.created_at.desc(), Job.id.desc())
+            .limit(RUNS_MAX).all())
+    return [job_out(j) for j in rows]

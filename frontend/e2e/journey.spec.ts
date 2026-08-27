@@ -197,15 +197,13 @@ test('a stranger onboards, installs an app, creates a VM and schedules a backup'
   })
 
   await test.step('schedule a backup', async () => {
-    await goToNavPage(page, 'Settings')
-    // Settings is sectioned now (lib/settings-sections.ts), and lands on its
-    // default section, Hosts. Schedules is a rail link rather than a card
-    // already on the page, so this is a navigation, not a scroll.
-    await page.getByRole('link', { name: 'Schedules' }).click()
-    await page.getByRole('button', { name: 'New schedule' }).click()
+    await page.getByRole('navigation')
+      .getByRole('link', { name: 'Backups', exact: true }).click()
+    await page.getByRole('button', { name: 'I understand' }).click()
+    await expect(page.getByRole('heading', { name: 'Backups', level: 1 })).toBeVisible()
+    await page.getByRole('button', { name: 'New job' }).click()
     await page.getByLabel('Name').fill(SCHEDULE_NAME)
-    // "What to run" defaults to backup.run ("Backup guests on a host") and
-    // its target select auto-picks our one host (ScheduleForm.tsx's
+    // The target select auto-picks our one host (ScheduleForm.tsx's
     // single-candidate fallback), nothing else needed for a valid submit,
     // except the Timezone field: it defaults to the browser's own zone
     // (Intl.DateTimeFormat), and this sandbox's Chromium reports a

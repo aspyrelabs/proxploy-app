@@ -291,12 +291,15 @@ def test_transfer_sends_the_recovery_code_and_resets_the_sequence(
 
 
 def test_the_heartbeat_carries_identity_and_a_rising_sequence(tmp_path, bootstrap_admin,
-                                                              csrf_header):
+                                                              csrf_header, monkeypatch):
     """The two signals the service uses to notice one seat being used from
     two machines. If the app stops sending either, clone detection silently
     stops working with nothing else failing."""
     from fastapi.testclient import TestClient
 
+    from proxploy.api import entitlements as ent_api
+
+    monkeypatch.setattr(ent_api, "collect_fingerprint", lambda: ["fp-a", "fp-b"])
     stub = StubLicenseClient(_fx_path())
     app = _fixture_app(tmp_path, stub)
     with TestClient(app) as client:
@@ -311,3 +314,4 @@ def test_the_heartbeat_carries_identity_and_a_rising_sequence(tmp_path, bootstra
     seqs = [r[2] for r in stub.refreshes]
     assert seqs == sorted(seqs) and len(set(seqs)) == len(seqs), seqs
     assert all(r[1] for r in stub.refreshes), "fingerprint must be sent every beat"
+    assert all(r[1] == ["fp-a", "fp-b"] for r in stub.refreshes)

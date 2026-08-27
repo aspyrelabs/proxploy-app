@@ -207,7 +207,7 @@ describe('StoreCard', () => {
     expect(screen.getByText('redis')).toBeInTheDocument()  // falls back to slug
     expect(screen.getByText('Uncategorized')).toBeInTheDocument()
     expect(screen.getByText('LXC')).toBeInTheDocument()  // the type badge
-    expect(screen.getByText('RE')).toBeInTheDocument()  // initials tile, no <img>
+    expect(screen.getByText('RED')).toBeInTheDocument()  // initials tile, no <img>
     expect(screen.queryByRole('img')).toBeNull()
     // still fully interactive despite having nothing scraped
     expect(screen.getByRole('button', { name: 'Install' })).toBeEnabled()
@@ -234,7 +234,7 @@ describe('StoreCard', () => {
     const img = screen.getByRole('img')
     expect(img).toHaveAttribute('src', enriched.icon_url)
     expect(img).toHaveAttribute('alt', 'Redis')
-    expect(screen.queryByText('RE')).toBeNull()  // the initials tile stays out of the way
+    expect(screen.queryByText('RED')).toBeNull()  // the initials tile stays out of the way
     expect(screen.getByText(/in-memory data structure store/)).toBeInTheDocument()
   })
 
@@ -244,7 +244,7 @@ describe('StoreCard', () => {
     const img = screen.getByRole('img')
     fireEvent.error(img)
     expect(screen.queryByRole('img')).toBeNull()
-    expect(screen.getByText('RE')).toBeInTheDocument()
+    expect(screen.getByText('RED')).toBeInTheDocument()
   })
 
   const BADGE = 'Not listed upstream'
@@ -267,7 +267,7 @@ describe('StoreCard', () => {
     render(<StoreCard entry={gone} onInstall={vi.fn()} onOpenDetail={vi.fn()} installCount={0} />)
     expect(screen.getByText(BADGE)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Install' })).toBeEnabled()
-    expect(screen.getByText('RE')).toBeInTheDocument()  // initials tile, no icon to show
+    expect(screen.getByText('RED')).toBeInTheDocument()  // initials tile, no icon to show
     expect(screen.queryByRole('img')).toBeNull()
     expect(screen.getByText('LXC')).toBeInTheDocument()  // the type badge keeps its place
     // Honest about what we actually know, and never the word "deprecated".

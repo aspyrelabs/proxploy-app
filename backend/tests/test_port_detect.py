@@ -173,11 +173,11 @@ def test_an_adopted_app_can_be_given_a_port_and_a_tile(tmp_path, csrf_header,
 
         r = c.patch(f"/api/v1/apps/{app_id}",
                     json={"web_port": 443, "icon_initials": "PT",
-                          "icon_colors": {"c1": "#F5B544", "c2": "#E79126"}},
+                          "icon_colors": {"dark": "#F5B544", "light": "#E79126"}},
                     headers=csrf_header(c))
         assert r.status_code == 200, r.text
         with app.state.sessionmaker() as db:
             saved = db.get(App, app_id)
             assert saved.web_port == 443
             assert saved.icon_initials == "PT"
-            assert saved.icon_colors == {"c1": "#F5B544", "c2": "#E79126"}
+            assert saved.icon_colors == {"dark": "#F5B544", "light": "#E79126"}

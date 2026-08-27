@@ -373,7 +373,7 @@ def test_every_registry_key_can_be_produced_by_something(inbox):
     producible = {type_for_job(k, s) for k in HANDLERS for s in TERMINAL}
     # The three with no job behind them, emitted by services/alerts.py and
     # services/audit.py.
-    producible |= {"alert.fired", "alert.resolved", "audit.error"}
+    producible |= {"alert.fired", "alert.resolved", "audit.error", "update.available"}
     assert set(BY_KEY) == producible
 
 
@@ -401,7 +401,7 @@ def test_every_notification_type_reaches_a_channel(tmp_path, csrf_header,
             assert notifier.notify(app, t.key, f"Proxploy: {t.label}",
                                    "- **Job:** #1") == 1, t.key
 
-    assert len(_Inbox.received) == len(TYPES) == 19
+    assert len(_Inbox.received) == len(TYPES) == 20
     titles = [m["title"] for m in _Inbox.received]
     for t in TYPES:
         assert f"Proxploy: {t.label}" in titles
@@ -422,4 +422,4 @@ def test_the_two_that_ship_off_stay_off_until_asked(tmp_path, csrf_header,
             reached = notifier.notify(app, t.key, "t", "b")
             assert reached == (0 if t.key.startswith("housekeeping.") else 1), t.key
 
-    assert len(_Inbox.received) == 17
+    assert len(_Inbox.received) == 18

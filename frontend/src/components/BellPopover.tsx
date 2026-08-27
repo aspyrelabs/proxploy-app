@@ -5,7 +5,7 @@ import { useJobs } from '../api/jobs'
 import { useFiringAlerts } from '../api/alerts'
 import { alertToastSeverity } from '../api/live'
 import type { JobRow } from '../api/jobs'
-import { actionLabel, ago, gerundFor, targetLabel } from '../lib/activityDisplay'
+import { actionLabel, ago, duration, gerundFor, targetLabel } from '../lib/activityDisplay'
 import { mergeNotifications } from '../lib/notificationMerge'
 import type { TrayItem } from '../lib/notificationMerge'
 import {
@@ -159,14 +159,6 @@ function messageOf(job: JobRow): string {
   // here: "Installing anytype-server on node1."
   return verb ? `${verb[0].toUpperCase()}${verb.slice(1)} ${where}.`
               : `Running on ${where}.`
-}
-
-function duration(job: JobRow): string | null {
-  if (!job.started_at || !job.finished_at) return null
-  const ms = new Date(job.finished_at).getTime() - new Date(job.started_at).getTime()
-  if (!Number.isFinite(ms) || ms < 0) return null
-  return ms < 1000 ? `${ms}ms` : ms < 60_000 ? `${(ms / 1000).toFixed(1)}s`
-                                             : `${Math.round(ms / 60_000)}m`
 }
 
 /** One line of context under the message: what it touched, how far along, and

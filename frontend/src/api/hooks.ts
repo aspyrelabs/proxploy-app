@@ -8,23 +8,38 @@ export type Entitlements = {
   features: Record<string, boolean>
   grace: { expires_at: string; grace_until: string; in_grace: boolean } | null
   clock_skew: boolean
+  refresh_error: string | null
+  reason: string | null
 }
 
 export function useMe() {
   return useQuery({ queryKey: ['me'], queryFn: () => api<Me>('/auth/me') })
 }
 
+export const ENTITLEMENTS_HEALTHY_MS = 24 * 60 * 60_000
+export const ENTITLEMENTS_DEGRADED_MS = 60 * 60_000
+
+export function entitlementsInterval(data: Entitlements | undefined): number {
+  if (!data) return ENTITLEMENTS_HEALTHY_MS
+  return data.refresh_error || data.grace?.in_grace
+    ? ENTITLEMENTS_DEGRADED_MS
+    : ENTITLEMENTS_HEALTHY_MS
+}
+
 export function useEntitlements() {
   const q = useQuery({
     queryKey: ['entitlements'],
     queryFn: () => api<Entitlements>('/entitlements'),
-    refetchInterval: 5 * 60_000,
+    staleTime: ENTITLEMENTS_HEALTHY_MS,
+    refetchInterval: (query) => entitlementsInterval(query.state.data),
   })
   return {
     ...q,
     tier: q.data?.tier ?? 'builtin',
     grace: q.data?.grace ?? null,
     clockSkew: q.data?.clock_skew ?? false,
+    refreshError: q.data?.refresh_error ?? null,
+    reason: q.data?.reason ?? null,
     // `has` stays fail-closed: a feature must never unlock because a fetch
     // failed, that would be a security bug. `unknown` is what lets a
     // consumer tell "not entitled" apart from "could not check" and render

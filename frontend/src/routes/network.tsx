@@ -15,6 +15,7 @@ import { LockVeil } from '../components/LockVeil'
 import { NicForm } from '../components/NicForm'
 import { Sparkline } from '../components/charts/Sparkline'
 import { Button } from '../components/ui/button'
+import { ButtonGroup, ButtonGroupSeparator } from '../components/ui/button-group'
 import { Skeleton, SkeletonGroup, SkeletonLine, SkeletonTable } from '../components/ui/skeleton'
 import { fmtBps } from '../lib/format'
 
@@ -211,12 +212,14 @@ function AttachmentMap({ attachments, nodes, pending }: {
                 </td>
                 <td className="py-2.5 font-mono text-[12px] text-text-3">{a.macaddr ?? 'unknown'}</td>
                 <td className="py-2.5 text-right">
-                  <Button size="sm" variant="ghost"
-                          disabled={denied}
-                          title={denied ? 'Not included in your plan' : undefined}
-                          onClick={() => setEditing(a)}>
-                    Edit
-                  </Button>
+                  <ButtonGroup>
+                    <Button size="sm" variant="ghost"
+                            disabled={denied}
+                            title={denied ? 'Not included in your plan' : undefined}
+                            onClick={() => setEditing(a)}>
+                      Edit
+                    </Button>
+                  </ButtonGroup>
                 </td>
               </tr>
             ))}
@@ -332,11 +335,12 @@ function HostNetworkSection({ nodes, pending }: { nodes: NodeIfaces[]; pending: 
               <div className="mb-2 flex flex-wrap items-center gap-2">
                 <h3 className="font-mono text-[13px]">{n.node}</h3>
                 <span className="text-[11.5px] text-text-3">{n.host_name}</span>
-                <div className="ml-auto flex gap-2">
+                <ButtonGroup className="ml-auto">
                   <Button size="sm" variant="ghost"
                           onClick={() => setEditing({ hostId: n.host_id, node: n.node, iface: null })}>
                     Add bridge
                   </Button>
+                  <ButtonGroupSeparator />
                   <Button size="sm" variant="ghost"
                           disabled={revert.isPending}
                           onClick={() => revert.mutate({ hostId: n.host_id, node: n.node }, {
@@ -345,12 +349,13 @@ function HostNetworkSection({ nodes, pending }: { nodes: NodeIfaces[]; pending: 
                           })}>
                     Discard staged
                   </Button>
+                  <ButtonGroupSeparator />
                   <Button size="sm" variant="danger"
                           disabled={apply.isPending}
                           onClick={() => fire(n.host_id, n.node)}>
                     Apply staged config
                   </Button>
-                </div>
+                </ButtonGroup>
               </div>
               <table aria-label={`Interfaces on ${n.node}`} className="w-full text-left text-[13px]">
                 <thead>
@@ -378,14 +383,17 @@ function HostNetworkSection({ nodes, pending }: { nodes: NodeIfaces[]; pending: 
                         {i.active ? 'up' : 'down'}
                       </td>
                       <td className="py-2.5 text-right">
-                        <Button size="sm" variant="ghost"
-                                onClick={() => setEditing({ hostId: n.host_id, node: n.node, iface: i })}>
-                          Edit
-                        </Button>
-                        <Button size="sm" variant="danger" className="ml-2"
-                                onClick={() => drop(n.host_id, n.node, i.iface)}>
-                          Remove
-                        </Button>
+                        <ButtonGroup>
+                          <Button size="sm" variant="ghost"
+                                  onClick={() => setEditing({ hostId: n.host_id, node: n.node, iface: i })}>
+                            Edit
+                          </Button>
+                          <ButtonGroupSeparator />
+                          <Button size="sm" variant="danger"
+                                  onClick={() => drop(n.host_id, n.node, i.iface)}>
+                            Remove
+                          </Button>
+                        </ButtonGroup>
                       </td>
                     </tr>
                   ))}

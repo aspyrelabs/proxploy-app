@@ -51,13 +51,16 @@ function presetOf(cron: string): { every: Every; time: string; dow: string } {
 /** Create or edit one schedule. `jobKind` pins the kind and hides the picker
  *  (how the Backups page reuses this); `existing` switches the same fields to
  *  a PATCH. */
-export function ScheduleForm({ jobKind, existing, onSaved }:
-  { jobKind?: string; existing?: ScheduleRow; onSaved: () => void }) {
+export function ScheduleForm({ jobKind, existing, exclude, onSaved, onCancel }:
+  { jobKind?: string; existing?: ScheduleRow; exclude?: string[]
+    onSaved: () => void; onCancel?: () => void }) {
+  const offered = SCHEDULABLE.filter((s) => !exclude?.includes(s.kind))
   const qc = useQueryClient()
   const preset = presetOf(existing?.cron ?? '0 2 * * *')
   const savedParams = (existing?.params ?? {}) as Record<string, unknown>
   const [name, setName] = useState(existing?.name ?? '')
-  const [kind, setKind] = useState(existing?.job_kind ?? jobKind ?? 'backup.run')
+  const [kind, setKind] = useState(
+    existing?.job_kind ?? jobKind ?? offered[0]?.kind ?? 'backup.run')
   const [every, setEvery] = useState<Every>(preset.every)
   const [time, setTime] = useState(preset.time)  // native <input type="time">
   const [dow, setDow] = useState(preset.dow)     // cron day-of-week, 0 = Sunday
@@ -211,7 +214,7 @@ export function ScheduleForm({ jobKind, existing, onSaved }:
                     if (e.target.value === 'backup.verify') setDoBackup(false)
                     if (e.target.value === 'backup.run') setDoBackup(true)
                   }}>
-            {SCHEDULABLE.map((s) =>
+            {offered.map((s) =>
               <option key={s.kind} value={s.kind}>{s.label}</option>)}
           </select>
         </div>
@@ -371,6 +374,11 @@ export function ScheduleForm({ jobKind, existing, onSaved }:
                 title={nothingToDo ? 'Tick Backup, Verify Backup, or both' : undefined}>
           {existing ? 'Save changes' : 'Create schedule'}
         </Button>
+        {onCancel && (
+          <Button type="button" variant="ghost" className="ml-2" onClick={onCancel}>
+            Close
+          </Button>
+        )}
       </div>
     </form>
   )

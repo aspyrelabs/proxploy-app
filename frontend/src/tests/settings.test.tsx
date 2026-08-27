@@ -323,7 +323,7 @@ describe('SettingsPage sections', () => {
     wrap()
     await screen.findByRole('heading', { name: 'Hosts' })
     const rail = screen.getByRole('navigation', { name: 'Settings sections' })
-    for (const label of ['Hosts', 'Channels', 'Events', 'Schedules', 'Teams',
+    for (const label of ['Hosts', 'Channels', 'Events', 'Maintenance', 'Teams',
                          'Users', 'API keys', 'Profile', 'Sessions', 'Console',
                          'Plan', 'Updates']) {
       expect(within(rail).getByText(label)).toBeInTheDocument()
@@ -331,7 +331,7 @@ describe('SettingsPage sections', () => {
     // Every entry carries a real ?section=, so a setting can be linked to and
     // bookmarked rather than only scrolled to.
     expect(railTargets).toEqual([
-      { section: 'hosts' }, { section: 'schedules' },
+      { section: 'hosts' }, { section: 'maintenance' },
       { section: 'teams' }, { section: 'users' }, { section: 'api-keys' },
       { section: 'channels' }, { section: 'events' },
       { section: 'profile' }, { section: 'sessions' }, { section: 'console' },

@@ -8,8 +8,11 @@ import {
 /** Rows per page, shared so the two tables on /backups agree. */
 export const PAGE_SIZE = 10
 
+export const TABLE_SCROLL = "overflow-x-auto"
+export const TABLE_MIN = "min-w-[46rem]"
+
 /**
- * Six columns pinned so the Scheduled jobs and Recent backups tables line up.
+ * Six columns, used by the Recent backups table.
  *
  * `table-fixed` plus one colgroup is what aligns them: auto layout cannot,
  * because the columns hold different things. The last column holds the
@@ -22,14 +25,23 @@ export const PAGE_SIZE = 10
 export const SIX_COL = (
   <colgroup>
     <col className="w-[22%]" />
-    <col className="w-[13%]" />
-    <col className="w-[15%]" />
-    <col className="w-[13%]" />
-    <col className="w-[11%]" />
-    {/* The widest of the six, because it has a hard floor: Recent backups
-        puts four buttons here (Verify, Test restore, Restore, Delete) and
-        Scheduled jobs three. */}
-    <col className="w-[26%]" />
+    <col />
+    <col />
+    <col />
+    <col />
+    <col className="w-[11.5rem]" />
+  </colgroup>
+)
+
+export const SCHED_COL = (
+  <colgroup>
+    <col className="w-[22%]" />
+    <col />
+    <col />
+    <col />
+    <col />
+    <col />
+    <col className="w-[11.5rem]" />
   </colgroup>
 )
 

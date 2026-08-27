@@ -45,13 +45,17 @@ export const GERUND: Record<string, string> = {
   'backup.verify': 'verifying the backups of',
   'backup.test_restore': 'test restoring',
   'catalog.classify_backlog': 'checking compatibility on',
+  'db.compact': 'reclaiming database space on',
   'catalog.refresh': 'refreshing the catalog on',
   'host.reboot': 'rebooting',
   'host.shutdown': 'shutting down',
   'metrics.maintain': 'tidying metrics on',
+  'jobs.prune': 'trimming job history on',
   'migrate.app': 'migrating',
   'network.apply': 'applying network changes on',
+  'sessions.cleanup': 'clearing expired sign-ins on',
   'storage.upload': 'uploading to',
+  'update.check': 'checking for a new release on',
   'storage.delete_volume': 'deleting a volume on',
   'vm.create': 'creating',
   'vm.clone': 'cloning',
@@ -71,6 +75,14 @@ export const GERUND: Record<string, string> = {
  *  signal to fall back to a sentence with no verb in it, never to invent one. */
 export function gerundFor(kind: string | null | undefined): string | null {
   return kind ? GERUND[kind] ?? null : null
+}
+
+export function duration(row: { started_at: string | null; finished_at: string | null }): string | null {
+  if (!row.started_at || !row.finished_at) return null
+  const ms = new Date(row.finished_at).getTime() - new Date(row.started_at).getTime()
+  if (!Number.isFinite(ms) || ms < 0) return null
+  return ms < 1000 ? `${ms}ms` : ms < 60_000 ? `${(ms / 1000).toFixed(1)}s`
+                                             : `${Math.round(ms / 60_000)}m`
 }
 
 export function ago(iso: string): string {
@@ -134,6 +146,7 @@ export const ACTION_LABEL: Record<string, string> = {
   'catalog.classify_backlog': 'Compatibility Check',
   'catalog.refresh': 'Store Refresh',
   'console.open': 'Console Open',
+  'db.compact': 'Database Compact',
   'entitlement.refresh': 'Plan Refresh',
   'host.create': 'Host Add',
   'host.credentials': 'Credentials Rotate',
@@ -146,7 +159,10 @@ export const ACTION_LABEL: Record<string, string> = {
   // "Job", not doc 13's "Task": every other surface says job, including the
   // Cancel button, the bell tray, the failure toast and the /jobs API.
   'job.cancel': 'Job Cancel',
+  'jobs.prune': 'History Cleanup',
   'metrics.maintain': 'Usage Cleanup',
+  'sessions.cleanup': 'Sign-in Cleanup',
+  'update.check': 'Update Check',
   // Doc 13 asks for "Migration Refused", but api/apps.py writes action="app.migrate"
   // for every REAL migration (result ok + job_id), and migrate.app is the job
   // kind, not a second audit action. Both identifiers carry the same neutral

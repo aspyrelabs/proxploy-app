@@ -107,6 +107,7 @@ class Entitlements:
         self._roots = roots
         self._features: dict[str, bool] = dict(DEFAULT_FEATURES)
         self._status = EntitlementStatus(tier="builtin", source="builtin")
+        self.refresh_error: str | None = None
 
     def verify(self, token: str, cert: str | None) -> dict:
         """Signature + shape only. exp is OURS to interpret (grace window), so
@@ -159,10 +160,27 @@ class Entitlements:
         self._status = EntitlementStatus(tier="builtin", source="builtin",
                                          reason=reason, clock_skew=clock_skew)
 
-    def load(self, db, secretstore) -> None:
+    def revalidation_lapsed(self, db, max_offline: timedelta | None) -> bool:
+        if max_offline is None:
+            return False
+        row = db.get(EntitlementCache, 1)
+        if not row or not row.token:
+            return False
+        since = row.fetched_at or row.created_at
+        if since is None or utcnow() - since <= max_offline:
+            return False
+        self.reset_builtin(
+            reason=f"licence not revalidated with the licence server since "
+                   f"{since.isoformat()}, past the "
+                   f"{max_offline.days}-day revalidation limit")
+        return True
+
+    def load(self, db, secretstore, max_offline: timedelta | None = None) -> None:
         row = db.get(EntitlementCache, 1)
         if not row or not row.token:
             self.reset_builtin()
+            return
+        if self.revalidation_lapsed(db, max_offline):
             return
         try:
             token = secretstore.decrypt(row.token.encode()).decode()
