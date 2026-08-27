@@ -37,6 +37,7 @@ export const SCHEDULABLE: { kind: string; label: string; needs: 'host' | 'app' |
   { kind: 'backup.verify', label: "Verify a host's backups are readable", needs: 'host' },
   { kind: 'app.update', label: 'Update an app', needs: 'app' },
   { kind: 'catalog.refresh', label: 'Refresh the app catalog', needs: null },
+  { kind: 'catalog.classify_backlog', label: 'Check app compatibility in the background', needs: null },
   { kind: 'metrics.maintain', label: 'Roll up and prune metrics', needs: null },
   { kind: 'sessions.cleanup', label: 'Remove expired sign-ins and console tickets', needs: null },
   { kind: 'jobs.prune', label: 'Delete job history older than the keep window', needs: null },

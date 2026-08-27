@@ -99,11 +99,24 @@ def apply_new_token(request: Request, db, token: str, cert: str) -> None:
     db.commit()
 
 
+def _licence_signature(app) -> tuple:
+    ent = app.state.entitlements
+    return (ent.refresh_error, ent.status().tier, ent.status().in_grace)
+
+
+def _publish_licence_change(app, before: tuple) -> None:
+    after = _licence_signature(app)
+    if after == before:
+        return
+    app.state.bus.publish("entitlement", {"refresh_error": after[0], "tier": after[1]})
+
+
 async def _refresh_loop(app) -> None:
     while True:
         interval = app.state.settings.license_heartbeat_interval_s
         # Jittered so a fleet activated together does not heartbeat in lockstep.
         await asyncio.sleep(interval + random.uniform(0, interval * 0.05))
+        before = _licence_signature(app)
         try:
             with app.state.sessionmaker() as db:
                 row = (db.query(AppSetting)
@@ -131,11 +144,13 @@ async def _refresh_loop(app) -> None:
                 req = _Req(); req.app = app
                 apply_new_token(req, db, out["token"], out.get("cert"))
                 app.state.entitlements.refresh_error = None
+            _publish_licence_change(app, before)
         except Exception as e:
             app.state.entitlements.refresh_error = str(e) or e.__class__.__name__
             with app.state.sessionmaker() as db:
                 app.state.entitlements.revalidation_lapsed(
                     db, timedelta(days=app.state.settings.license_revalidation_days))
+            _publish_licence_change(app, before)
             continue  # doc 07 §8: transient failure = keep serving, retry later
 
 

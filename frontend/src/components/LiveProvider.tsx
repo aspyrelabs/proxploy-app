@@ -84,6 +84,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
         delay = Math.min(delay * 2, 30000)
       }
       wire('metrics', (d) => applyMetrics(qc, d))
+      wire('entitlement', () => qc.invalidateQueries({ queryKey: ['entitlements'] }))
       wire('resource', (d) => applyResource(qc, d))
       wire('job', (d) => applyJob(qc, d, (t) => {
         if (!inApp.current) return   // notify.inapp gates the surface, not the data

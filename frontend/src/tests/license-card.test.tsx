@@ -94,7 +94,8 @@ describe('LicenseCard', () => {
     fireEvent.change(screen.getByLabelText('License key'), { target: { value: 'PPL-A' } })
     fireEvent.click(screen.getByRole('button', { name: 'Activate' }))
     await waitFor(() => expect(calls.some(c => c.path === '/entitlements/license')).toBe(true))
-    expect(calls[0].body).toEqual({ license_key: 'PPL-A' })
+    expect(calls.find(c => c.path === '/entitlements/license')!.body)
+      .toEqual({ license_key: 'PPL-A' })
   })
 
   it('turns a held seat into the transfer choice rather than an error line', async () => {
@@ -127,7 +128,8 @@ describe('LicenseCard', () => {
 
     await waitFor(() =>
       expect(calls.some(c => c.path === '/entitlements/license/transfer')).toBe(true))
-    expect(calls.at(-1)!.body).toEqual({ license_key: 'PPL-A', recovery_code: 'RC-1' })
+    expect(calls.find(c => c.path === '/entitlements/license/transfer')!.body)
+      .toEqual({ license_key: 'PPL-A', recovery_code: 'RC-1' })
   })
 
   it('keeps the dialog open and explains a refused transfer', async () => {

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useEntitlements } from '../api/hooks'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ApiError, api, apiErrorDetail } from '../api/client'
 import { Button } from './ui/button'
@@ -40,6 +41,23 @@ function ago(iso: string | null): string {
 
 function shortId(id: string): string {
   return id.length > 12 ? id.slice(0, 8) : id
+}
+
+function LicenceHealth() {
+  const { refreshError, reason } = useEntitlements()
+  if (!refreshError && !reason) return null
+  return (
+    <div className="rounded-tile border border-amber/30 bg-amber-dim px-3 py-2
+                    text-[12.5px] text-text-2">
+      {refreshError && (
+        <p>
+          Proxploy could not reach the licence server on its last check.
+          Your plan keeps working and it retries every hour.
+        </p>
+      )}
+      {reason && <p className={refreshError ? 'mt-1' : ''}>{reason}</p>}
+    </div>
+  )
 }
 
 export function LicenseCard({ tier, licensed }: { tier: string; licensed: boolean }) {
@@ -102,6 +120,7 @@ export function LicenseCard({ tier, licensed }: { tier: string; licensed: boolea
           <span className="font-mono text-amber">{tier.toUpperCase()}</span>
           {', '}active on this installation.
         </p>
+        <LicenceHealth />
         <div className="flex flex-wrap gap-2">
           <Button variant="ghost" onClick={() => setShowHistory(h => !h)}>
             {showHistory ? 'Hide installations' : 'Installations'}
@@ -143,6 +162,7 @@ export function LicenseCard({ tier, licensed }: { tier: string; licensed: boolea
         <span className="font-mono text-amber">{tier.toUpperCase()}</span>
         {', '}one Proxmox host. Enter a license key to activate this installation.
       </p>
+      <LicenceHealth />
       <div className="flex flex-col gap-2 sm:flex-row">
         <input
           aria-label="License key"
