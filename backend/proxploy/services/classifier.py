@@ -108,6 +108,64 @@ def _is_guarded(preceding: list[str], targets: set[str]) -> bool:
     return False
 
 
+# The prompt sentence a script shows a human, recovered from `read -p`. This
+# is the ONLY description of the value that exists: there is no schema, no
+# help text, nothing upstream declares.
+PROMPT_TEXT_RE = re.compile(r"""-p\s+(?:"([^"]*)"|'([^']*)')""")
+
+# Enumerated choices the prompt spells out, e.g. "(15/16/17/18)" or
+# "[1=agent, 2=agent2]". Recovered so the UI can offer a select rather than a
+# free text box the operator has to guess into.
+CHOICES_RE = re.compile(r"[(\[](\d+(?:/\d+){1,})[)\]]")
+DEFAULT_RE = re.compile(r"\[([^\[\]]{1,24})\]\s*:?\s*$")
+
+
+def extract_prompts(install_script: str) -> list[dict]:
+    """Every unguarded prompt, in source order, as the UI needs to ask it.
+
+    Same walk and the same guards as classify_install_feasibility, so the two
+    can never disagree about what counts as a prompt. A guarded prompt is
+    absent on purpose: build.func already satisfies it from the environment,
+    so there is nothing to ask.
+
+    Returns [] for a script with no unguarded prompts, which is also what a
+    fully installable script returns, so a caller needs no special case.
+    """
+    out: list[dict] = []
+    lines = install_script.splitlines()
+    for i, line in enumerate(lines):
+        bare = _unquoted(line)
+        if WHIPTAIL_RE.search(bare):
+            targets: set[str] = set()
+        elif READ_RE.search(bare) and not NOT_A_PROMPT_RE.search(bare):
+            targets = _read_targets(bare)
+        else:
+            continue
+        if "||" in bare:
+            continue
+        if _is_guarded(lines[max(0, i - 3):i], targets):
+            continue
+        # The variable is read from the RAW line: _unquoted has already thrown
+        # away the -p prompt text, which is where the human-readable part is.
+        m = PROMPT_TEXT_RE.search(line)
+        text = (m.group(1) or m.group(2) or "") if m else ""
+        # ${TAB3} and friends are layout, not words: upstream indents prompts
+        # with them and they would render as literal noise in a form label.
+        text = re.sub(r"\$\{?\w+\}?", "", text).strip()
+        name = sorted(targets)[0] if targets else None
+        if not name:
+            continue
+        choices = CHOICES_RE.search(text)
+        default = DEFAULT_RE.search(text)
+        out.append({
+            "variable": name,
+            "label": text or name,
+            "choices": choices.group(1).split("/") if choices else None,
+            "default": default.group(1) if default else None,
+        })
+    return out
+
+
 def classify_install_feasibility(ct_script: str, install_script: str) -> tuple[bool, str | None]:
     if len(BUILD_CONTAINER_RE.findall(ct_script)) != 1:
         return False, UNSUPPORTED_MULTI_CT
