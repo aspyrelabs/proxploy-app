@@ -14,6 +14,7 @@ from collections import deque
 from proxploy.executor import SSHExecutor
 from proxploy.jobs import HANDLERS, JobContext, JobFailed
 from proxploy.models import App, AppScript, CatalogEntry, Host, Job, utcnow
+from proxploy.services import installanswers
 from proxploy.services.catalog import pinned_payload_script, raw_url
 from proxploy.services.hostclient import client_for_host
 from proxploy.services.proxmox import ProxmoxError
@@ -93,6 +94,51 @@ def _resolve(app, catalog_slug: str, host_id: int):
         # under "addon_script" instead (services/catalog.py).
         install_script = pinned_payload_script(entry) or ""
         return entry, host, install_script
+
+
+# Answers the operator gave to prompts the upstream installer never guarded.
+#
+# BY VARIABLE, NOT BY POSITION. The obvious implementation pipes answers to
+# stdin in order, and it silently misfires: of the 70 blocked scripts measured
+# on 2026-08-27, 21 have prompts inside an if/case and 8 inside a loop, so a
+# branch not taken shifts every later answer onto the wrong question. `docker`,
+# the most installed app in the catalog, is one of them. Matching on the
+# variable a prompt assigns into is order, branch and loop proof.
+#
+# Verified on node1 on 2026-08-27: exported bash FUNCTIONS cross `lxc-attach`,
+# which is how build.func:5194 runs the installer inside the container. That
+# same hop already carries FUNCTIONS_FILE_PATH, which every install script
+# sources, so this rides upstream's own mechanism rather than adding one.
+#
+# PXP_ANSWERED is an explicit allowlist, deliberately not "any variable that
+# happens to be set". This shim is in scope for build.func's own `read` calls
+# too, and it has to stay inert for every prompt we were not asked about:
+# those fall through to `builtin read`, meet the DEVNULL stdin, and behave
+# exactly as they did before this existed.
+READ_SHIM = (
+    'read() { local _a _t=""; for _a in "$@"; do case "$_a" in -*) ;; '
+    '*) _t="$_a" ;; esac; done; '
+    'if [ -n "$_t" ]; then case " ${PXP_ANSWERED:-} " in *" $_t "*) return 0 ;; esac; fi; '
+    'builtin read "$@"; }; export -f read; '
+)
+
+
+def apply_answers(ctx: JobContext, env: dict, command: str,
+                  plain: dict, secret: dict) -> str:
+    """Put answers in the environment, prefix the shim, return the command.
+
+    `secret` values are hidden from every job sink (JobContext.hide); `plain`
+    ones are not, because a version number or a timezone left readable in the
+    transcript is what makes a failed install diagnosable.
+    """
+    answers = {**plain, **secret}
+    if not answers:
+        return command
+    for name, value in answers.items():
+        env[str(name)] = str(value)
+    env["PXP_ANSWERED"] = " ".join(str(k) for k in answers)
+    ctx.hide(*[str(v) for v in secret.values()])
+    return READ_SHIM + command
 
 
 async def run_install(ctx: JobContext, params: dict) -> dict:
@@ -225,6 +271,14 @@ async def run_install(ctx: JobContext, params: dict) -> dict:
     _url = shlex.quote(raw_url(entry.upstream_sha, entry.script_path))
     command = f"bash -c \"$(curl -fsSL {_url})\""
 
+    # The secret half never travelled in params: it was staged encrypted by
+    # the route and params carries only the handle. See services/installanswers.
+    answers_handle = params.get("answers_handle")
+    with app.state.sessionmaker() as db:
+        secret_answers = installanswers.load(db, app.state.secretstore, answers_handle)
+    command = apply_answers(ctx, env, command,
+                            params.get("answers") or {}, secret_answers)
+
     # The script's last words are where it prints the finished URL, so they are
     # kept as they stream rather than read back out of job_events: job_events
     # has no retention policy, so a parse depending on those rows would quietly
@@ -329,6 +383,11 @@ async def run_install(ctx: JobContext, params: dict) -> dict:
     # "unknown" for up to a poll interval.
     app.state.poller.wake(host_id)
     app.state.bus.publish("resource", {"type": "app", "id": app_id, "change": "installed"})
+    # Bound only now, on a run that provably produced an app. Until this the
+    # row is an orphan on a TTL; after it, ON DELETE CASCADE means uninstalling
+    # the app takes its secrets with it and nothing has to remember to.
+    with app.state.sessionmaker() as db:
+        installanswers.bind(db, answers_handle, app_id)
     return {"app_id": app_id, "slug": out_slug}
 
 
@@ -608,6 +667,12 @@ async def run_update(ctx: JobContext, params: dict) -> dict:
              f"rc=$?; rm -f /tmp/proxploy-update.sh; exit $rc")
     command = f"pct exec {int(a['ctid'])} -- bash -c {shlex.quote(inner)}"
     env: dict[str, str] = {}
+    # An update re-runs the same script and meets the same prompts, so it
+    # re-answers from what the install stored rather than asking again. This
+    # is the reason the rows outlive the install.
+    with app.state.sessionmaker() as db:
+        stored = installanswers.for_app(db, app.state.secretstore, app_id)
+    command = apply_answers(ctx, env, command, {}, stored)
     try:
         status = await executor.run_for_host(
             app.state.sessionmaker, app.state.secretstore, a["host_id"],

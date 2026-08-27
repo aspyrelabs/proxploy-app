@@ -231,6 +231,36 @@ class HostCredential(TimestampMixin, Base):
 
 
 
+class InstallAnswer(TimestampMixin, Base):
+    """An operator's answers to an install script's unguarded prompts, encrypted.
+
+    Why a row rather than `jobs.params`: enqueue() redacts params by KEY NAME,
+    and the names here come from whoever wrote the upstream community-scripts
+    installer, not from us. Measured against the real catalog on 2026-08-27,
+    11 of 15 prompts asking for something sensitive have a name the heuristic
+    misses, including an admin password in `ziti_pwd` and an enrollment JWT in
+    a variable called `prompt`. So the value never enters params at all; params
+    carries `handle` and nothing else, and there is nothing left to redact.
+
+    `app_id` is NULL until the install succeeds, because app.install is what
+    CREATES the app: the row is staged by the route, bound to the app it built,
+    and swept if that never happens. Same shape as the `spool_path` an upload
+    route stages for its job, kept in the database instead of on disk because
+    this is a secret.
+
+    Kept after the install rather than deleted, because app.update re-runs the
+    same script and hits the same prompts. An answer the operator gave once
+    should not have to be typed again to apply a patch release.
+    """
+    __tablename__ = "install_answers"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    handle: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    app_id: Mapped[int | None] = mapped_column(
+        ForeignKey("apps.id", ondelete="CASCADE"), index=True)
+    encrypted_blob: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    key_version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+
+
 class App(TimestampMixin, Base):
     __tablename__ = "apps"
     id: Mapped[int] = mapped_column(primary_key=True)
