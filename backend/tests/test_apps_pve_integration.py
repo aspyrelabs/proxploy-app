@@ -30,15 +30,28 @@ pytestmark = pytest.mark.pve_integration
 SLUG = os.environ.get("PROXPLOY_TEST_PVE_APP_SLUG", "adguard")
 
 
+def _storage_overrides() -> dict:
+    out = {}
+    rootfs = os.environ.get("PROXPLOY_TEST_PVE_STORAGE_ROOTFS")
+    template = os.environ.get("PROXPLOY_TEST_PVE_STORAGE_TEMPLATE")
+    if rootfs:
+        out["container_storage"] = rootfs
+    if template:
+        out["template_storage"] = template
+    return out
+
+
 def _ingest(app) -> str:
-    from proxploy.models import CatalogEntry
-    from proxploy.services.catalog import run_ingest
+    from proxploy.services.catalog import ensure_classified, run_discovery
 
     with app.state.sessionmaker() as db:
-        result = run_ingest(db, [SLUG])
-        if result["failed"]:
-            pytest.skip(f"catalog ingest failed (no GitHub access?): {result['failed']}")
-        entry = db.query(CatalogEntry).filter_by(slug=SLUG).one()
+        try:
+            run_discovery(db)
+        except Exception as e:
+            pytest.skip(f"catalog discovery failed (no GitHub access?): {e}")
+        entry = ensure_classified(db, SLUG)
+        if entry is None:
+            pytest.skip(f"{SLUG} is not in the upstream catalog")
         if not entry.installable:
             pytest.skip(f"{SLUG} is not installable: {entry.unsupported_reason}")
         return entry.upstream_sha
@@ -65,7 +78,7 @@ def test_the_whole_app_lifecycle_on_real_hardware(tmp_path):
             out = await HANDLERS["app.install"](
                 livepve.job_ctx(app, "app.install"),
                 {"catalog_slug": SLUG, "host_id": host_id, "ctid": ctid,
-                 "name": f"int-{SLUG}", "overrides": {}})
+                 "name": f"int-{SLUG}", "overrides": _storage_overrides()})
             app_id = out["app_id"]
 
             # The container really exists, read back over SSH rather than from
@@ -74,6 +87,7 @@ def test_the_whole_app_lifecycle_on_real_hardware(tmp_path):
             assert rc == 0 and str(ctid) in listing, (
                 f"install reported success but CT {ctid} is not on the node:\n{listing}")
 
+            await _wait_for_login_shell(ctid)
             await _console_round_trip(app, host_id, ctid)
 
             # Roll the pin back so there is a real update to perform.
@@ -109,12 +123,32 @@ def test_the_whole_app_lifecycle_on_real_hardware(tmp_path):
     asyncio.run(go())
 
 
+async def _wait_for_login_shell(ctid: int) -> None:
+    for _ in range(30):
+        rc, out = await livepve.ssh_run(
+            f"pct exec {ctid} -- systemctl is-active container-getty@1")
+        if rc == 0 and out.strip().startswith("active"):
+            await asyncio.sleep(4)
+            return
+        await asyncio.sleep(2)
+    pytest.skip(f"CT {ctid} never brought up container-getty@1; "
+                f"its console cannot be probed")
+
+
 async def _console_round_trip(app, host_id, ctid: int) -> None:
     """A real root shell in the container, through the product's own bridge.
 
     Proves all four console fixes at once: the Authorization header on the
     upgrade, the percent-encoded vncticket, bytes frames decoded to text, and
     a handshake that actually reaches a PTY.
+
+    The wait between the nudge and the command is load-bearing, established on
+    node1 on 2026-08-27: a PTY just attached to by termproxy discards whatever
+    arrives within ~200ms of the first keystroke that wakes it. Measured on a
+    freshly installed adguard CT, the nudge always echoed and the command was
+    always swallowed at gaps of 0, 1, 10 and 50ms, and always arrived at 200ms
+    and 1s. Sending both in ONE message loses it too, so this is the PTY
+    flushing its input queue, not the 0:len: framing or message boundaries.
     """
     from proxploy.models import Host
     from proxploy.services.ptybridge import connect_upstream_pty
@@ -130,15 +164,29 @@ async def _console_round_trip(app, host_id, ctid: int) -> None:
         upstream_user=up["user"], upstream_ticket=up["ticket"],
         upstream_port=str(up["port"]), verify_tls=verify_tls,
         tls_fingerprint=None, auth_header=client.pve_auth_header)
+
+    def text(frame) -> str:
+        return (frame.decode("utf-8", "replace")
+                if isinstance(frame, (bytes, bytearray)) else frame)
+
+    async def send(chunk: str) -> None:
+        await ws.send(f"0:{len(chunk.encode())}:{chunk}")
+
     try:
         marker = "proxploy-console-probe"
-        payload = f"echo {marker}\n"
-        await ws.send(f"0:{len(payload.encode())}:{payload}")
         seen = buffered
+        await send("\n")
+        for _ in range(10):
+            try:
+                seen += text(await asyncio.wait_for(ws.recv(), timeout=2))
+            except asyncio.TimeoutError:
+                break
+        if not seen.rstrip().endswith(("#", "$")):
+            raise AssertionError(
+                f"the console never reached a shell prompt: {seen[-300:]!r}")
+        await send(f"echo {marker}\n")
         for _ in range(25):
-            frame = await asyncio.wait_for(ws.recv(), timeout=10)
-            seen += (frame.decode("utf-8", "replace")
-                     if isinstance(frame, (bytes, bytearray)) else frame)
+            seen += text(await asyncio.wait_for(ws.recv(), timeout=8))
             if seen.count(marker) >= 2:      # the typed line AND its output
                 return
         raise AssertionError(f"no echo came back from the console: {seen[-200:]!r}")
@@ -174,7 +222,7 @@ def test_install_refuses_a_ctid_that_already_exists(tmp_path):
                 await HANDLERS["app.install"](
                     livepve.job_ctx(app, "app.install"),
                     {"catalog_slug": SLUG, "host_id": host_id, "ctid": ctid,
-                     "name": "dupe", "overrides": {}})
+                     "name": "dupe", "overrides": _storage_overrides()})
         finally:
             await livepve.destroy_guest(app, host_id, "lxc", ctid)
 

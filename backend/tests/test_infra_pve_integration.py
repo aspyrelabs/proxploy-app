@@ -75,7 +75,7 @@ def test_iso_upload_and_delete_round_trip(tmp_path):
         out = await HANDLERS["storage.upload"](
             livepve.job_ctx(app, "storage.upload"),
             {"host_id": host_id, "storage": ISO_STORAGE, "content": "iso",
-             "filename": name, "path": str(payload),
+             "filename": name, "spool_path": str(payload),
              "size_bytes": payload.stat().st_size})
         assert out["exitstatus"] == "OK"
 

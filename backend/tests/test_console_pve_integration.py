@@ -74,13 +74,34 @@ async def _make_running_ct(app, host_id, ctid: int) -> None:
     if not vols:
         pytest.skip(f"no CT template on {ISO_STORAGE}; "
                     f"run `pveam download {ISO_STORAGE} <template>` first")
+    systemd = [v for v in vols
+               if any(d in v["volid"] for d in ("debian", "ubuntu"))]
+    if not systemd:
+        pytest.skip(f"no systemd CT template on {ISO_STORAGE}; the autologin "
+                    f"override this fixture installs needs systemd and bash")
+    template = systemd[0]["volid"]
     rc, out = await livepve.ssh_run(
-        f"pct create {ctid} {vols[0]['volid']} --hostname pxp-console-{ctid} "
+        f"pct create {ctid} {template} --hostname pxp-console-{ctid} "
         f"--rootfs {ROOTFS_STORAGE}:2 --memory 512 --cores 1 --unprivileged 1 "
         f"--net0 name=eth0,bridge=vmbr0,ip=dhcp "
         f"--password proxploy-console-fixture && pct start {ctid}")
     assert rc == 0, f"could not create the fixture container: {out[-400:]}"
-    await asyncio.sleep(3)          # let the PTY come up
+    await asyncio.sleep(5)
+    unit = "/etc/systemd/system/container-getty@1.service.d"
+    getty = ("[Service]\\nExecStart=\\nExecStart=-/sbin/agetty --autologin root "
+             "--noclear --keep-baud tty1 115200,38400,9600 \\$TERM\\n")
+    rc, out = await livepve.ssh_run(
+        f"pct exec {ctid} -- bash -c \"mkdir -p {unit} && "
+        f"printf '{getty}' > {unit}/autologin.conf && "
+        f"systemctl daemon-reload && systemctl restart container-getty@1\"")
+    assert rc == 0, f"could not give the fixture container a login shell: {out[-400:]}"
+    for _ in range(20):
+        await asyncio.sleep(2)
+        rc, out = await livepve.ssh_run(
+            f"pct exec {ctid} -- systemctl is-active container-getty@1")
+        if rc == 0 and out.strip().startswith("active"):
+            break
+    await asyncio.sleep(4)
 
 
 @live_only
