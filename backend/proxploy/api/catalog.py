@@ -92,6 +92,9 @@ def _serialize(r: CatalogEntry) -> dict:
         "default_disk_gb": r.default_disk_gb, "default_os": r.default_os,
         "default_os_version": r.default_os_version,
         "installable": r.installable, "unsupported_reason": r.unsupported_reason,
+        # The questions the install dialog has to ask. NULL until the row is
+        # classified, so the client renders nothing rather than guessing.
+        "prompts": r.prompts,
         "synced_at": to_iso(r.synced_at),
         # `script_path` is SERVED, never derived. The slug is not the filename for
         # the 84 unfiltered rows: 35 pve (`tools/pve/add-iptag.sh`), 32 addon, 16 vm

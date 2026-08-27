@@ -203,6 +203,20 @@ EXIT_RE = re.compile(r"\bexit\b")
 # 8 of the 70 blocked scripts have one. They stay unsupported until the answer
 # can be validated against something the loop is known to accept, which is
 # possible for an enumerated choice and not for free text.
+# What a gate is warning ABOUT. The sentence in `read -p` is only "Do you want
+# to continue?"; the reason sits in the msg_warn lines above it, and that is
+# the part the operator actually needs:
+#
+#   msg_warn "WARNING: This script will run an external installer from a
+#             third-party source (https://pi-hole.net/)."
+#   msg_warn "The following code is NOT maintained or audited by our repository."
+#
+# Captured verbatim and shown verbatim. Paraphrasing would put OUR words on a
+# third party's risk disclosure, and softening "NOT maintained or audited by
+# our repository" is exactly the edit nobody should make for an operator.
+WARN_LINE_RE = re.compile(r"""\bmsg_(?:warn|error|custom)\b[^"']*(?:"([^"]*)"|'([^']*)')""")
+WARN_WINDOW = 8
+
 LOOP_OPEN_RE = re.compile(r"^\s*(?:while|until)\b")
 LOOP_CLOSE_RE = re.compile(r"^\s*done\b")
 
@@ -275,10 +289,20 @@ def extract_prompts(install_script: str) -> list[dict]:
         window = "\n".join(lines[i + 1:i + 1 + GATE_WINDOW])
         gate = bool(EXIT_RE.search(window)
                     and re.search(re.escape(name), window, re.I))
+        warnings: list[str] = []
+        if gate:
+            for before in lines[max(0, i - WARN_WINDOW):i]:
+                m2 = WARN_LINE_RE.search(before)
+                if not m2:
+                    continue
+                w = re.sub(r"\$\{?\w+\}?", "", m2.group(1) or m2.group(2) or "").strip()
+                if w:
+                    warnings.append(w)
         out.append({
             "variable": name,
             "label": text or name,
             "gate": gate,
+            "warnings": warnings,
             "in_loop": loop_depth > 0,
             "sensitive": bool(SILENT_READ_RE.search(bare)
                               or SENSITIVE_PROMPT_RE.search(text)),

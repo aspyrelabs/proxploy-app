@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from './client'
+import type { Prompt } from '../lib/install-prompts'
 
 // Every non-ct type stays in the catalog table, tagged by type, and never
 // appears in the Store grid (catalog expansion plan, decision: LXC-only
@@ -84,7 +85,12 @@ export type CatalogRow = {
   synced_at: string | null
 }
 
-export type CatalogEntryDetail = CatalogRow & { raw: { ct_script: string; install_script: string } | null }
+export type CatalogEntryDetail = CatalogRow & {
+  raw: { ct_script: string; install_script: string } | null
+  // What the install script asks a human, recovered by the classifier against
+  // the same upstream_sha an install pins. null until the row is classified.
+  prompts: Prompt[] | null
+}
 
 export function useCatalog(category?: string, q?: string, entryType: CatalogEntryType = 'ct') {
   return useQuery({
@@ -145,6 +151,10 @@ export type InstallVars = {
   // Optional: blank/null means the node assigns the next free id
   // (InstallIn.ctid, backend/proxploy/api/catalog.py).
   slug: string; host_id: number; name: string; ctid: number | null
+  // Keyed by the variable each prompt assigns into. Validated server side
+  // against the catalog row's own prompts, so a key this script never asks
+  // about is a 400 rather than a stray environment variable on the node.
+  answers?: Record<string, string>
   // Every key here reaches the remote script as `var_{key}` (run_install in
   // backend/proxploy/services/appstore.py). A wrong or misspelled key does
   // NOT error: build.func just ignores it, falls back to its own default,
@@ -163,7 +173,8 @@ export function useInstall() {
       api<{ job: { id: number; kind: string; progress_pct: number | null } }>(`/catalog/${v.slug}/install`, {
         method: 'POST',
         body: JSON.stringify({ host_id: v.host_id, name: v.name, ctid: v.ctid,
-                              overrides: v.overrides, consent: v.consent }),
+                              overrides: v.overrides, consent: v.consent,
+                              answers: v.answers ?? {} }),
       }),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ['jobs'] })

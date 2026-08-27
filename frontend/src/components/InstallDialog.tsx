@@ -2,6 +2,8 @@ import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { api } from '../api/client'
 import { useCatalogEntry, useInstall } from '../api/catalog'
+import { PromptFields } from './install/PromptFields'
+import { unanswered } from '../lib/install-prompts'
 import { figure, text } from '../api/catalogMetadata'
 import { CoreFields, type CoreFieldsValue } from './install/CoreFields'
 import { knownPool, useStoragePools } from './install/pools'
@@ -38,6 +40,7 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
   const [name, setName] = useState('')
   const [ctid, setCtid] = useState('')
   const [consent, setConsent] = useState(false)
+  const [answers, setAnswers] = useState<Record<string, string>>({})
   // Default asks nothing that has an honest default; Advanced expands the
   // container-customization block. CTID has an honest default too (blank means
   // the node assigns the next free id) but stays in the base section, since
@@ -171,10 +174,19 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
 
   // CTID is no longer required: blank means the node assigns the next free
   // id (InstallIn.ctid, backend/proxploy/api/catalog.py).
+  // What the upstream script asks that build.func cannot answer from the
+  // environment. Empty for every app that was installable before this existed.
+  const prompts = entry?.prompts ?? []
+  // A gate is unticked until the operator ticks it, and a prompt with no
+  // default has no value to fall back on, so both block Install. Letting either
+  // through produces an install that blocks on a closed stdin.
+  const missingAnswers = unanswered(prompts, answers)
+
   const canSubmit = (consent || !needsConsent) && hostId != null && name.trim() !== ''
     && !storageUnknown
     && (!asksContainer || storage.container !== '')
     && (!asksTemplate || storage.template !== '')
+    && missingAnswers.length === 0
 
   const submit = () => {
     if (!canSubmit || hostId == null) return
@@ -196,7 +208,8 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
       if (core.unprivileged != null) overrides.unprivileged = core.unprivileged ? '1' : '0'
     }
     install.mutate(
-      { slug, host_id: hostId, name, ctid: ctid.trim() === '' ? null : Number(ctid), overrides, consent },
+      { slug, host_id: hostId, name, ctid: ctid.trim() === '' ? null : Number(ctid),
+        overrides, consent, answers },
       { onSuccess: (r) => { setJobId(r.job.id); setProgress(r.job.progress_pct) } },
     )
   }
@@ -355,6 +368,7 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
                 template={storage.template} onChange={setStorage} />
             </div>
           )}
+          <PromptFields prompts={prompts} answers={answers} onChange={setAnswers} />
           <div className="text-[12px] text-text-2">
             This installs and executes a community-scripts.org script on the target node,
             exactly as if you ran it yourself.
