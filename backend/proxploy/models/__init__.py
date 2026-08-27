@@ -481,6 +481,14 @@ class CatalogEntry(TimestampMixin, Base):
     # install-attempt, or via the low-priority backlog job.
     installable: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     unsupported_reason: Mapped[str | None] = mapped_column(Text)
+    # What the install script asks a human, recovered by
+    # services/classifier.extract_prompts. Written in the SAME pass that sets
+    # `installable` and against the same `upstream_sha`, so the verdict and the
+    # questions behind it can never describe different versions of the script.
+    # An install pins that sha too, which is what makes a positional-free,
+    # variable-keyed answer safe: the script we ask about is the script we run.
+    # NULL means never classified; [] means classified and it asks nothing.
+    prompts: Mapped[list | None] = mapped_column(JSON)
     synced_at: Mapped[datetime | None] = mapped_column(DateTime)
     # Which upstream directory this came from: ct/vm/tools-pve/tools-addon/
     # turnkey, mechanical per the repo's own layout (services/catalog.py's

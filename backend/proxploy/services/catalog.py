@@ -32,7 +32,8 @@ from proxploy.models import CatalogEntry
 from proxploy.services.catalog_categories import category_for
 from proxploy.services.classifier import (UNSUPPORTED_ADDON_DELEGATED,
                                           addon_delegation_slug,
-                                          classify_install_feasibility)
+                                          classify_install_feasibility,
+                                          extract_prompts)
 
 RAW_BASE = "https://raw.githubusercontent.com/community-scripts/ProxmoxVE"
 HEAD_COMMIT_API = "https://api.github.com/repos/community-scripts/ProxmoxVE/commits/main"
@@ -370,9 +371,13 @@ def ensure_classified(db, slug: str) -> CatalogEntry | None:
         # step that never answers a prompt on the operator's behalf, not a
         # softer verdict here.
         installable, reason = False, UNSUPPORTED_ADDON_DELEGATED
+        prompts: list = []
     else:
         installable, reason = classify_install_feasibility(ct_resp.text,
                                                            install_resp.text)
+        # Same pass, same script text, same sha as the verdict above. Split
+        # them and the two eventually describe different revisions.
+        prompts = extract_prompts(install_resp.text)
     _apply_script_presentation(row, meta)
     row.default_cpu = meta.get("default_cpu")
     row.default_ram_mb = meta.get("default_ram_mb")
@@ -381,6 +386,7 @@ def ensure_classified(db, slug: str) -> CatalogEntry | None:
     row.default_os_version = meta.get("default_os_version")
     row.installable = installable
     row.unsupported_reason = reason
+    row.prompts = prompts
     row.raw = _keep_metadata(row, {"ct_script": ct_resp.text,
                                    payload_key: install_resp.text})
     db.commit()

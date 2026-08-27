@@ -142,13 +142,49 @@ SENSITIVE_PROMPT_RE = re.compile(
 # Enumerated choices the prompt spells out, e.g. "(15/16/17/18)" or
 # "[1=agent, 2=agent2]". Recovered so the UI can offer a select rather than a
 # free text box the operator has to guess into.
-CHOICES_RE = re.compile(r"[(\[](\d+(?:/\d+){1,})[)\]]")
+# Enumerated alternatives, digits or short letters: "(15/16/17/18)" and
+# "<n/l/a>" are the same offer written two ways. Checked AFTER YESNO_RE, which
+# would otherwise be swallowed by this since "<y/N>" has the identical shape.
+# Tokens are capped at 3 characters so this cannot swallow a sentence
+# containing a slash.
+CHOICES_RE = re.compile(r"[(\[<](\w{1,3}(?:/\w{1,3}){1,3})[)\]>]")
 # A yes/no prompt, and which way it defaults: upstream writes the default as
 # the capitalised letter, so "[y/N]" declines and "[Y/n]" accepts.
 YESNO_RE = re.compile(r"[\[(<]\s*(y/n|yes/no)\s*[\])>]", re.I)
 # Checked AFTER YESNO_RE, or "[y/N]" is read as a default literally spelled
 # "y/N" and offered to the operator as if it were a value.
 DEFAULT_RE = re.compile(r"\[([^\[\]]{1,24})\]\s*:?\s*$")
+
+
+# A prompt whose answer can ABORT the run: an `exit` guarded by the prompt's
+# own variable, close enough after the read to be that prompt's consequence.
+#
+# Detected mechanically rather than from the wording, and the wording is why.
+# These read "This script will run an external installer from a third-party
+# source ... NOT maintained or audited by our repository. Do you want to
+# continue? [y/N]", and no phrasing rule separates that reliably from "Would
+# you like to add Unbound?". The `exit` does: one aborts the install, the other
+# skips an extra.
+#
+# 16 of the 70 blocked scripts have one, 155,205 recorded installs. It matters
+# because the capitalised default is `n`, so defaulting it aborts the install
+# and reports failure, while flipping it to `y` silently consents to running
+# unaudited third-party code on the operator's behalf. Neither is ours to pick,
+# which is why `answerable_without_asking` below refuses to touch one.
+GATE_WINDOW = 8
+EXIT_RE = re.compile(r"\bexit\b")
+
+
+def answerable_without_asking(prompt: dict) -> bool:
+    """True when the prompt can be satisfied with no operator input.
+
+    A gate NEVER can, at any layer. That is asserted rather than merely
+    intended: pre-answering a consent question is the same act as defaulting
+    it to yes with extra steps.
+    """
+    if prompt.get("gate"):
+        return False
+    return prompt["kind"] == "yesno" or prompt.get("default") is not None
 
 
 def extract_prompts(install_script: str) -> list[dict]:
@@ -197,9 +233,13 @@ def extract_prompts(install_script: str) -> list[dict]:
         else:
             m2 = DEFAULT_RE.search(text)
             default = m2.group(1) if m2 else None
+        window = "\n".join(lines[i + 1:i + 1 + GATE_WINDOW])
+        gate = bool(EXIT_RE.search(window)
+                    and re.search(re.escape(name), window, re.I))
         out.append({
             "variable": name,
             "label": text or name,
+            "gate": gate,
             "sensitive": bool(SENSITIVE_PROMPT_RE.search(text)),
             "kind": "yesno" if yesno else ("choice" if choices else "text"),
             "choices": choices.group(1).split("/") if choices else None,
