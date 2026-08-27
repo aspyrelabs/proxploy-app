@@ -48,6 +48,17 @@ strands every install permanently: the public key is baked into every release,
 so rotating it means publishing a release signed with the key you no longer
 have.
 
+The canonical backup of both halves lives on OneDrive, in:
+
+```
+/Users/aasim/Library/CloudStorage/OneDrive-24Seven/Business/Aspyre Labs/02 - Products/08 - proxploy/InformationTechnology/app
+```
+
+That holds the private key and its public key together, out of the repo and
+out of CI. Treat that path as the record of record when someone asks "where is
+the release key" — but it is a backup, not a working copy: the private key is
+still generated and used at `~/proxploy-release-key.pem` per Step 1.
+
 Lost track of where you ran it? Find the private half of the key the repo
 actually carries:
 
