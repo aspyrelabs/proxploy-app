@@ -165,18 +165,23 @@ Step 6.
 
 ## 6. Publish the channel
 
-The site is the **`proxploy-web`** repo (`~/AspyreLabs/proxploy-web`), a Vite
+The paths below assume this machine (Linux), where both repos live under
+`~/workspace/aspyrelabs/proxploy/`. On macOS the equivalent is
+`~/AspyreLabs/proxploy-app` and `~/AspyreLabs/proxploy-web` — substitute those
+if you run this runbook there.
+
+The site is the **`proxploy-web`** repo (`~/workspace/aspyrelabs/proxploy/proxploy-web`), a Vite
 SPA deployed by Coolify on every push to `main`. Its `Dockerfile` ships
 `dist/public` to nginx's html root, and Vite copies only `publicDir` there, so
 everything below goes under **`public/`**. Files at the repo root are
 committed, deployed, and never served.
 
 ```bash
-cd ~/AspyreLabs/proxploy-web
+cd ~/workspace/aspyrelabs/proxploy/proxploy-web
 mkdir -p public/releases/latest public/releases/1.0.0
-cp ~/AspyreLabs/proxploy-app/dist/manifest.json \
-   ~/AspyreLabs/proxploy-app/dist/manifest.json.sig \
-   ~/AspyreLabs/proxploy-app/dist/proxploy-1.0.0.tar.gz \
+cp ~/workspace/aspyrelabs/proxploy/proxploy-app/dist/manifest.json \
+   ~/workspace/aspyrelabs/proxploy/proxploy-app/dist/manifest.json.sig \
+   ~/workspace/aspyrelabs/proxploy/proxploy-app/dist/proxploy-1.0.0.tar.gz \
    public/releases/latest/
 cp public/releases/latest/* public/releases/1.0.0/
 ```
@@ -201,9 +206,9 @@ directory (`releases/edge/`) and a `--channel` flag, nothing more.
 ## 7. Serve the installer at the install URL
 
 ```bash
-cp ~/AspyreLabs/proxploy-app/dist/install.sh \
-   ~/AspyreLabs/proxploy-web/public/install.sh
-cd ~/AspyreLabs/proxploy-web && git add -A && git commit && git push
+cp ~/workspace/aspyrelabs/proxploy/proxploy-app/dist/install.sh \
+   ~/workspace/aspyrelabs/proxploy/proxploy-web/public/install.sh
+cd ~/workspace/aspyrelabs/proxploy/proxploy-web && git add -A && git commit && git push
 ```
 
 `public/install.sh`, so `https://web.proxploy.dev/install.sh` returns it
