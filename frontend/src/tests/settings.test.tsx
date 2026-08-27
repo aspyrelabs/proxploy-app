@@ -83,7 +83,7 @@ vi.mock('@tanstack/react-router', async (orig) => ({
 }))
 
 import { SettingsPage } from '../routes/settings'
-import { SETTINGS_SECTIONS } from '../lib/settings-sections'
+import { SETTINGS_SECTIONS, resolveSettingsSection } from '../lib/settings-sections'
 
 /** `at` is the ?section= the page opens on; omitted means the default (Hosts). */
 const wrap = (at?: string) => {
@@ -372,6 +372,26 @@ describe('SettingsPage sections', () => {
   it('falls back to Hosts when the URL names a section that does not exist', async () => {
     wrap('backups-but-in-settings')
     expect(await screen.findByRole('heading', { name: 'Hosts' })).toBeInTheDocument()
+  })
+})
+
+describe('resolveSettingsSection', () => {
+  it('sends an old ?section=schedules link on to Maintenance', () => {
+    expect(resolveSettingsSection('schedules')).toBe('maintenance')
+  })
+
+  it('leaves a section that still exists alone', () => {
+    expect(resolveSettingsSection('maintenance')).toBe('maintenance')
+    expect(resolveSettingsSection('hosts')).toBe('hosts')
+  })
+
+  it('rejects a section that never existed, so the page falls back to Hosts', () => {
+    expect(resolveSettingsSection('backups-but-in-settings')).toBeUndefined()
+  })
+
+  it('rejects a search param that is not a string', () => {
+    expect(resolveSettingsSection(undefined)).toBeUndefined()
+    expect(resolveSettingsSection(7)).toBeUndefined()
   })
 })
 
