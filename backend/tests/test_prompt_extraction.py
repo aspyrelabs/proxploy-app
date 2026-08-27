@@ -2,8 +2,8 @@
 
 Every line here is a real one from the upstream catalog, not an invention.
 The point of the exercise is that upstream is inconsistent in ways a tidy
-fixture would hide: a default spelled `[1]`, choices spelled `(15/16/17)`,
-and prompts indented with `${TAB3}`.
+fixture would hide: `-rp` and `-r -p`, `<y/N>` and `[y/N]` and `(y/N)`, a
+default spelled `[1]`, and a variable called `prompt` holding a JWT.
 """
 from proxploy.services.classifier import classify_install_feasibility, extract_prompts
 
@@ -17,17 +17,19 @@ def one(line: str) -> dict:
 def test_layout_variables_are_stripped_from_the_label():
     """Upstream indents prompts with ${TAB3}. Rendered literally in a form
     label it is noise the operator has to read past."""
-    assert one('read -r -p "${TAB3}Enter admin email address: " ADMIN_EMAIL')["label"] \
+    assert one('read -rp "${TAB3}Enter admin email address: " ADMIN_EMAIL')["label"] \
         == "Enter admin email address:"
 
 
 def test_enumerated_choices_become_a_list():
-    p = one('read -r -p "${TAB3}Enter PostgreSQL version (15/16/17/18): " ver')
+    p = one('read -rp "${TAB3}Enter PostgreSQL version (15/16/17/18): " ver')
+    assert p["kind"] == "choice"
     assert p["choices"] == ["15", "16", "17", "18"]
 
 
 def test_a_stated_default_is_recovered():
     p = one('read -r -p "${TAB3}Select machine-learning type [1]: " ML_TYPE')
+    assert p["kind"] == "text"
     assert p["default"] == "1"
 
 
@@ -74,3 +76,31 @@ def test_prompts_come_back_in_source_order():
         'read -r -p "third? [y/N] " THREE',
     ])
     assert [p["variable"] for p in extract_prompts(script)] == ["one", "two", "three"]
+def test_the_label_survives_a_combined_short_flag():
+    """`read -rp` is as common upstream as `read -r -p`. Matching only the
+    spaced form lost the label on a quarter of all prompts and fell back to the
+    variable name, which is what the operator would then have been asked."""
+    spaced = one('read -r -p "${TAB3}Enter your ACME Email: " ACME_EMAIL_INPUT')
+    combined = one('read -rp "${TAB3}Enter your ACME Email: " ACME_EMAIL_INPUT')
+    assert spaced["label"] == combined["label"] == "Enter your ACME Email:"
+
+
+def test_a_yes_no_prompt_defaults_to_the_capitalised_side():
+    """Upstream writes the default as the capital letter. Declining is also
+    the safe reading when it is ambiguous: these gate OPTIONAL extras, so "no"
+    installs strictly less than the operator asked for, never more."""
+    for text in ("<y/N>", "[y/N]", "(y/N)"):
+        p = one(f'read -r -p "${{TAB3}}Would you like to add Unbound? {text} " prompt')
+        assert p["kind"] == "yesno", text
+        assert p["default"] == "n", text
+    assert one('read -r -p "Install it? <Y/n> " opt')["default"] == "y"
+
+
+def test_a_yes_no_marker_is_never_mistaken_for_a_default_value():
+    """`[y/N]` matches the shape of a trailing default, so an ordering bug
+    here offers the operator a value literally spelled "y/N"."""
+    p = one('read -r -p "${TAB3}Do you want to continue? [y/N]: " CONFIRM')
+    assert p["kind"] == "yesno"
+    assert p["default"] == "n"
+
+

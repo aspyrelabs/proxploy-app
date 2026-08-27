@@ -110,13 +110,21 @@ def _is_guarded(preceding: list[str], targets: set[str]) -> bool:
 
 # The prompt sentence a script shows a human, recovered from `read -p`. This
 # is the ONLY description of the value that exists: there is no schema, no
-# help text, nothing upstream declares.
-PROMPT_TEXT_RE = re.compile(r"""-p\s+(?:"([^"]*)"|'([^']*)')""")
+# help text, nothing upstream declares. The variable name is not a substitute
+# `-\w*p` because short flags combine: `read -rp "..."` is as common upstream
+# as `read -r -p "..."`, and matching only the spaced form lost the label on a
+# quarter of all prompts, silently falling back to the variable name.
+PROMPT_TEXT_RE = re.compile(r"""-\w*p\s+(?:"([^"]*)"|'([^']*)')""")
 
 # Enumerated choices the prompt spells out, e.g. "(15/16/17/18)" or
 # "[1=agent, 2=agent2]". Recovered so the UI can offer a select rather than a
 # free text box the operator has to guess into.
 CHOICES_RE = re.compile(r"[(\[](\d+(?:/\d+){1,})[)\]]")
+# A yes/no prompt, and which way it defaults: upstream writes the default as
+# the capitalised letter, so "[y/N]" declines and "[Y/n]" accepts.
+YESNO_RE = re.compile(r"[\[(<]\s*(y/n|yes/no)\s*[\])>]", re.I)
+# Checked AFTER YESNO_RE, or "[y/N]" is read as a default literally spelled
+# "y/N" and offered to the operator as if it were a value.
 DEFAULT_RE = re.compile(r"\[([^\[\]]{1,24})\]\s*:?\s*$")
 
 
@@ -155,13 +163,23 @@ def extract_prompts(install_script: str) -> list[dict]:
         name = sorted(targets)[0] if targets else None
         if not name:
             continue
-        choices = CHOICES_RE.search(text)
-        default = DEFAULT_RE.search(text)
+        yesno = YESNO_RE.search(text)
+        choices = None if yesno else CHOICES_RE.search(text)
+        default = None
+        if yesno:
+            # The capitalised side is upstream's own default. Declining is also
+            # the safe answer when it is ambiguous: these prompts gate OPTIONAL
+            # extras, so "no" installs strictly less.
+            default = "y" if yesno.group(1)[0].isupper() else "n"
+        else:
+            m2 = DEFAULT_RE.search(text)
+            default = m2.group(1) if m2 else None
         out.append({
             "variable": name,
             "label": text or name,
+            "kind": "yesno" if yesno else ("choice" if choices else "text"),
             "choices": choices.group(1).split("/") if choices else None,
-            "default": default.group(1) if default else None,
+            "default": default,
         })
     return out
 
