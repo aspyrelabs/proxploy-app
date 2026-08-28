@@ -175,8 +175,7 @@ export function StorageForm({ existing, onClose }:
     {/* Never hide a gated feature, veil it. The Close button sits OUTSIDE the
         veil: LockVeil sets pointer-events:none on its children, and a dialog
         you cannot dismiss is worse than the feature being gated. */}
-    <LockVeil locked={locked}
-      title="Storage management is a Pro feature"
+    <LockVeil locked={locked} feature="storage.manage"
       subtitle="Attach, edit and detach datastores without leaving Proxploy.">
       <form id="sf-form" onSubmit={submit} className="mt-4 space-y-3">
         <div className={BOX}>

@@ -129,8 +129,7 @@ export function AuditPage() {
     <div className="space-y-5">
       <h1 className="font-display text-[22px] font-semibold">Audit log</h1>
 
-      <LockVeil locked={denied}
-                title="Audit log is a Pro feature"
+      <LockVeil locked={denied} feature="audit.log"
                 subtitle="See and export every action taken across your hosts, apps and users.">
         <section className={card}>
           <div className="mb-4 flex flex-wrap items-end justify-between gap-3">

@@ -6,6 +6,10 @@ export type Me = { id: number; email: string; display_name: string | null; role:
 export type Entitlements = {
   tier: string
   features: Record<string, boolean>
+  // Only the features this install does NOT have, each naming the lowest tier
+  // that grants it. The backend derives it from its own tier sets, so no gate
+  // in this app has to hardcode which plan a feature belongs to.
+  required_tier: Record<string, string>
   grace: { expires_at: string; grace_until: string; in_grace: boolean } | null
   clock_skew: boolean
   refresh_error: string | null
@@ -46,6 +50,10 @@ export function useEntitlements() {
     // "could not check" instead of the UI of a tenant who simply lacks the
     // feature.
     has: (key: string) => q.data?.features[key] ?? false,
+    // The plan a locked feature needs, or null when it is not locked (or we
+    // could not check). Only ever used for copy, never for an access
+    // decision, which is `has` above and, really, the backend.
+    tierFor: (key: string) => q.data?.required_tier?.[key] ?? null,
     unknown: q.isError,
   }
 }

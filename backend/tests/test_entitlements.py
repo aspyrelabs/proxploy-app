@@ -71,23 +71,48 @@ def _token(priv_pem, *, kid="leaf1", features=None, exp_delta_h=72, grace_delta_
     return jwt.encode(claims, priv_pem, algorithm="EdDSA", headers={"kid": kid})
 
 
-def test_registry_is_exactly_82_all_on():
-    from proxploy.entitlements.registry import DEFAULT_FEATURES, FLAG_KEYS
+def test_registry_is_exactly_87_keys():
+    from proxploy.entitlements.registry import (
+        DEV_FEATURES, FLAG_KEYS, FREE_FEATURES, FREE_OFF)
 
     assert len(FLAG_KEYS) == 87 and len(set(FLAG_KEYS)) == 87
     for probe in ("hosts.multi", "store.install", "jobs.engine", "ent.client",
                   "platform.error_report", "terminal.node"):
         assert probe in FLAG_KEYS
-    assert DEFAULT_FEATURES == {k: True for k in FLAG_KEYS}
+    # Both maps cover every key. A key absent from a map is OFF, not
+    # "unspecified", so a partial map is a silent feature removal.
+    assert set(FREE_FEATURES) == set(FLAG_KEYS) == set(DEV_FEATURES)
+    assert FREE_OFF <= set(FLAG_KEYS), sorted(FREE_OFF - set(FLAG_KEYS))
+    assert DEV_FEATURES == {k: True for k in FLAG_KEYS}
+    assert FREE_FEATURES == {k: k not in FREE_OFF for k in FLAG_KEYS}
+    # Free is a real tier, not all-on. If this ever passes with an empty
+    # FREE_OFF the tier split has quietly stopped existing.
+    assert FREE_OFF, "the free floor grants everything: the tier split is inert"
 
 
-def test_builtin_path_unknown_key_fails_closed():
+def test_builtin_path_is_the_free_floor_and_unknown_keys_fail_closed():
+    """No token means Homelab, not "everything". Before 2026-08-28 this was
+    every flag on, which made activating a Homelab licence a downgrade."""
     from proxploy.entitlements.client import Entitlements
 
     ent = Entitlements(roots={})
-    assert ent.enabled("hosts.multi") is True
+    assert ent.enabled("apps.lifecycle") is True    # free floor keeps this
+    assert ent.enabled("hosts.multi") is False      # and does not get this
     assert ent.enabled("not.a.flag") is False
     assert ent.status().source == "builtin"
+
+
+def test_dev_features_is_an_explicit_opt_in():
+    """DEV_FEATURES must never be reachable by default or by config. It is
+    passed in by hand or it does not apply."""
+    from proxploy.entitlements.client import Entitlements
+    from proxploy.entitlements.registry import DEV_FEATURES
+
+    ent = Entitlements(roots={}, baseline=DEV_FEATURES)
+    assert ent.enabled("hosts.multi") is True
+    # and it survives a fallback, same as the free floor does
+    ent.reset_builtin(reason="whatever")
+    assert ent.enabled("hosts.multi") is True
 
 
 def test_full_chain_verifies():
@@ -285,4 +310,79 @@ def test_entitlements_endpoint(client, csrf_header, bootstrap_admin):
     assert body["tier"] == "builtin" and body["grace"] is None
     assert body["clock_skew"] is False
     assert len(body["features"]) == 87
-    assert all(body["features"].values())
+    # The free floor, not all-on: an install with no licence is a Homelab
+    # install and the endpoint must report exactly that map.
+    from proxploy.entitlements.registry import FREE_FEATURES, FREE_OFF
+    assert body["features"] == FREE_FEATURES
+    # Off keys only, each naming the tier that would grant it. This is what
+    # stops the UI hardcoding "Pro" next to a gate that is really Team.
+    assert set(body["required_tier"]) == set(FREE_OFF)
+    assert body["required_tier"]["hosts.multi"] == "pro"
+    assert body["required_tier"]["teams.rbac"] == "team"
+
+
+# --- Cross-repo key-set parity (PXP-21 arming, 2026-08-28) -------------------
+#
+# The footgun this closes: apply_claims REPLACES the feature map with the
+# token's `features` claim, and enabled() returns False for a key it has never
+# heard of. So a key that exists in registry.py but is missing from
+# proxploy-api's tiers.yaml is a feature that a free install keeps and a
+# LICENSED install loses at activation. Nothing errors, nothing logs, and it
+# only shows up on whichever tier happens to be missing the key, months later,
+# in production.
+#
+# proxploy-api has the mirror of these two tests (tests/test_tiers.py). Both
+# sides carry a copy so drift fails whichever repo you are working in, and both
+# skip when the sibling checkout is absent, which is also the one hole left:
+# neither CI checks out the other repo, so these run locally only. Checking out
+# the sibling in CI is the fix; until then, running the suite in a tree with
+# both repos present is what catches drift.
+
+def _tiers_yaml():
+    import pathlib
+
+    import yaml
+
+    p = (pathlib.Path(__file__).resolve().parents[3]
+         / "proxploy-api/proxploy_api/tiers.yaml")
+    if not p.exists():
+        import pytest
+        pytest.skip(f"proxploy-api checkout not present at {p}")
+    return yaml.safe_load(p.read_text())
+
+
+def test_registry_and_tiers_yaml_have_identical_key_sets():
+    from proxploy.entitlements.registry import FLAG_KEYS
+
+    data = _tiers_yaml()
+    listed = set(data["features"])
+    assert listed == set(FLAG_KEYS), (
+        f"missing from tiers.yaml: {sorted(set(FLAG_KEYS) - listed)}; "
+        f"not in registry.py: {sorted(listed - set(FLAG_KEYS))}")
+    # Each tier map too, not just the declared list: a tier that omits a key
+    # mints a token that switches it off for that tier alone.
+    for name, m in data["tiers"].items():
+        assert set(m) == set(FLAG_KEYS), (
+            f"tier {name} key set differs from registry.py: "
+            f"missing {sorted(set(FLAG_KEYS) - set(m))}, "
+            f"extra {sorted(set(m) - set(FLAG_KEYS))}")
+
+
+def test_free_baseline_matches_the_homelab_tier():
+    """No licence and a Homelab licence must grant exactly the same thing.
+
+    If these drift, activating a Homelab key either adds or removes features
+    relative to not activating at all, which is the bug that made the old
+    all-true DEFAULT_FEATURES worse than useless.
+    """
+    from proxploy.entitlements.registry import FREE_FEATURES, PRO_OFF
+
+    tiers = _tiers_yaml()["tiers"]
+    homelab = tiers["homelab"]
+    assert FREE_FEATURES == homelab, {
+        k: (FREE_FEATURES.get(k), homelab.get(k))
+        for k in set(FREE_FEATURES) | set(homelab)
+        if FREE_FEATURES.get(k) != homelab.get(k)}
+    # PRO_OFF only feeds required_tier(), so drift here is a 403 naming the
+    # wrong plan rather than a wrong access decision. Still user-visible.
+    assert PRO_OFF == {k for k, on in tiers["pro"].items() if not on}

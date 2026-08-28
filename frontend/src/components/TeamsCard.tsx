@@ -3,6 +3,7 @@ import { Fragment, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { api, apiErrorDetail } from '../api/client'
 import { useEntitlements } from '../api/hooks'
+import { LockVeil } from './LockVeil'
 import { notify } from '../lib/notify'
 import { ROLE_OPTIONS, useTeamMembers, useTeams, useUsers } from '../api/teams'
 import type { MemberRow, TeamRow, UserRow } from '../api/teams'
@@ -246,7 +247,13 @@ export function TeamsCard() {
         */}
       </div>
       {ent.data != null && !teamsAllowed && (
-        <p className="text-[12.5px] text-text-3">Not included in your plan.</p>
+        <LockVeil locked feature="teams.rbac"
+          subtitle="Group hosts into teams and give each person a role, so not everyone is an owner."
+          skeleton={<div aria-hidden className="pt-1">
+            <SkeletonTable cols={['w-28', 'w-16', 'w-16', 'w-12']} rows={3} />
+          </div>}>
+          <></>
+        </LockVeil>
       )}
       {teamsAllowed && (
         <>

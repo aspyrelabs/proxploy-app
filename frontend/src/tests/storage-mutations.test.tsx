@@ -27,7 +27,9 @@ vi.mock('../api/client', () => ({
   api: vi.fn((path: string, opts?: any) => {
     calls.push({ path, opts })
     if (path === '/entitlements') {
-      return Promise.resolve({ tier: 'pro', features, grace: null, clock_skew: false })
+      return Promise.resolve({ tier: 'pro', features,
+                               required_tier: { 'storage.manage': 'pro' },
+                               grace: null, clock_skew: false })
     }
     if (path === '/hosts') return Promise.resolve([{ id: 1, name: 'host-01' }])
     if (path.endsWith('/events')) return Promise.resolve([])
@@ -268,8 +270,10 @@ describe('StorageForm', () => {
     withQuery(<StorageForm existing={null} onClose={vi.fn()} />)
     // has() is false until the first fetch resolves, gating on !has() alone
     // would veil this for every plan during load.
-    expect(screen.queryByText('Unlock Pro')).toBeNull()
-    expect(await screen.findByText('Unlock Pro')).toBeInTheDocument()
+    expect(screen.queryByText(/This is a .* feature/)).toBeNull()
+    expect(await screen.findByText('This is a Pro feature')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /Please upgrade/i }))
+      .toHaveAttribute('href', 'https://proxploy.com/#pricing')
   })
 
   // TYPES is the four plugins this form can ATTACH, but Edit opens on ANY row

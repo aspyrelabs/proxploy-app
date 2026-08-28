@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 from proxploy.api.deps import authorize, get_db, get_entitlements
 from proxploy.entitlements.client import TokenInvalid
+from proxploy.entitlements.registry import required_tier
 from proxploy.models import AppSetting, EntitlementCache, to_iso, utcnow
 from proxploy.services.audit import write_audit
 from proxploy.services.fingerprint import collect as collect_fingerprint
@@ -28,7 +29,17 @@ def entitlements(ent=Depends(get_entitlements)):
     if st.source == "token":
         grace = {"expires_at": to_iso(st.expires_at),
                  "grace_until": to_iso(st.grace_until), "in_grace": st.in_grace}
-    return {"tier": st.tier, "features": ent.snapshot(), "grace": grace,
+    features = ent.snapshot()
+    return {"tier": st.tier, "features": features, "grace": grace,
+            # Which tier would grant each feature this install does NOT have.
+            # Off keys only: it exists so the UI can say "this is a Team
+            # feature" instead of hardcoding a tier next to every gate, and a
+            # feature you already have has nothing to upgrade to. Derived from
+            # registry.required_tier, whose sets are pinned against
+            # proxploy-api's tiers.yaml, so this cannot drift into naming the
+            # wrong plan.
+            "required_tier": {k: required_tier(k)
+                              for k, on in features.items() if not on},
             "clock_skew": st.clock_skew, "refresh_error": ent.refresh_error,
             "reason": st.reason}
 

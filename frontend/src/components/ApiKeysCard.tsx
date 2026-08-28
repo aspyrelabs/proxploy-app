@@ -4,6 +4,8 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { api, apiErrorDetail } from '../api/client'
 import { notify } from '../lib/notify'
 import { useEntitlements } from '../api/hooks'
+import { LockVeil } from './LockVeil'
+import { SkeletonTable } from './ui/skeleton'
 import { useApiKeys } from '../api/apikeys'
 import type { ApiKeyCreated, ApiKeyRow } from '../api/apikeys'
 import { QueryState } from './QueryState'
@@ -125,7 +127,13 @@ export function ApiKeysCard() {
         )}
       </div>
       {ent.data != null && !apiTokensAllowed && (
-        <p className="text-[12.5px] text-text-3">Not included in your plan.</p>
+        <LockVeil locked feature="api.tokens"
+          subtitle="Mint scoped API keys so CI and scripts can drive Proxploy without a browser session."
+          skeleton={<div aria-hidden className="pt-1">
+            <SkeletonTable cols={['w-24', 'w-20', 'w-16', 'w-20', 'w-14']} rows={3} />
+          </div>}>
+          <></>
+        </LockVeil>
       )}
       {apiTokensAllowed && (
         <>

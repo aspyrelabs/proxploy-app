@@ -2,6 +2,7 @@ import hashlib
 
 from fastapi import Depends, HTTPException, Request
 
+from proxploy.entitlements.registry import TIER_LABEL, required_tier
 from proxploy.models import ApiKey, Host, Team, TeamMember, User, utcnow
 from proxploy.services.authn import resolve_session
 # Re-exported: both live with the other host-shaped helpers so
@@ -78,11 +79,30 @@ def get_entitlements(request: Request):
     return request.app.state.entitlements
 
 
+def entitlement_error(key: str) -> HTTPException:
+    """The one 403 shape for a feature the licence does not include.
+
+    Every denial goes through here, including the handful of gates that check
+    inline rather than as a route dependency, so an operator gets the same body
+    wherever they hit the boundary. `error` and `feature` predate this and the
+    frontend keys off them; `required_tier` and `message` were added when the
+    tiers were armed (2026-08-28), because "entitlement_required: hosts.multi"
+    tells someone what broke and nothing about what to do next.
+    """
+    tier = required_tier(key)
+    return HTTPException(403, {
+        "error": "entitlement_required",
+        "feature": key,
+        "required_tier": tier,
+        "message": f"This feature is part of Proxploy {TIER_LABEL[tier]}.",
+    })
+
+
 def require_entitlement(key: str):
     """Doc 07 §2 backend enforcement, stack after auth/role deps on every gated route."""
     def dep(request: Request):
         if not request.app.state.entitlements.enabled(key):
-            raise HTTPException(403, {"error": "entitlement_required", "feature": key})
+            raise entitlement_error(key)
     return dep
 
 

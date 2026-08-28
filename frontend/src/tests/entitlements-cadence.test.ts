@@ -5,7 +5,7 @@ import {
 import type { Entitlements } from '../api/hooks'
 
 const base: Entitlements = {
-  tier: 'pro', features: {}, grace: null, clock_skew: false,
+  tier: 'pro', features: {}, required_tier: {}, grace: null, clock_skew: false,
   refresh_error: null, reason: null,
 }
 

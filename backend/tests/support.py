@@ -13,6 +13,33 @@ def make_db(tmp_path: Path):
     return make_sessionmaker(make_engine(s))()
 
 
+def entitle(app, *keys: str):
+    """Switch entitlement flags on for a test that is not about entitlements.
+
+    The no-licence floor is Homelab (registry.FREE_FEATURES), so anything above
+    that tier is off by default and a test exercising a paid feature has to say
+    so. That is the point: before the tiers were armed every flag was on for
+    everyone and no test ever had to name what it depended on.
+
+    Raises the install's BASELINE, not just the live map. The lifespan calls
+    entitlements.load(), which resets to the baseline when it finds no cached
+    token, so anything written only to `_features` here is gone by the time the
+    first request arrives. Same reason a mid-test refresh would drop it.
+
+    Reaches into the client rather than minting a token because a real one needs
+    proxploy-api's signing key. Tests about the token path itself
+    (test_entitlements.py) go through apply_claims instead.
+    """
+    from proxploy.entitlements.registry import FLAG_KEYS
+
+    unknown = [k for k in keys if k not in FLAG_KEYS]
+    assert not unknown, f"not entitlement flags: {unknown}"
+    ent = app.state.entitlements
+    ent._baseline.update(dict.fromkeys(keys, True))
+    ent._features.update(dict.fromkeys(keys, True))
+    return app
+
+
 def seed_host_row(db, name="host-01", node="pve1", status="connected"):
     from proxploy.models import Host
 

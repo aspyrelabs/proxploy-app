@@ -40,7 +40,10 @@ vi.mock('../api/client', async (importOriginal) => ({
   api: vi.fn((path: string, opts?: RequestInit) => {
     const method = opts?.method
     if (path === '/entitlements') {
-      return Promise.resolve({ tier: 'builtin', features: { 'teams.rbac': teamsRbac }, grace: null, clock_skew: false })
+      return Promise.resolve({
+        tier: 'builtin', features: { 'teams.rbac': teamsRbac },
+        required_tier: teamsRbac ? {} : { 'teams.rbac': 'team' },
+        grace: null, clock_skew: false })
     }
     if (path === '/teams' && !method) {
       if (teamsError) return Promise.reject(new ApiError(502, { detail: 'boom' }))
@@ -104,7 +107,9 @@ describe('TeamsCard', () => {
   it('gates the whole card behind teams.rbac: no fetch, plan message shown', async () => {
     teamsRbac = false
     wrap()
-    expect(await screen.findByText('Not included in your plan.')).toBeInTheDocument()
+    expect(await screen.findByText('This is a Team feature')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /Please upgrade/i }))
+      .toHaveAttribute('href', 'https://proxploy.com/#pricing')
     expect(calls.some((c) => c.path === '/teams')).toBe(false)
     expect(screen.queryByRole('button', { name: 'New team' })).toBeNull()
   })

@@ -15,13 +15,18 @@ def pve_client(tmp_path, csrf_header, bootstrap_admin):
     from proxploy.config import Settings
     from proxploy.main import create_app
     from tests.fakes.pve import FakePVE, make_fake_factory
+    from tests.support import entitle
 
     fake = FakePVE(version=json.loads((FIX / "version_pve8.json").read_text()),
                    permissions=json.loads((FIX / "permissions_full.json").read_text()))
     limiter.reset()
     s = Settings(db_url=f"sqlite:///{tmp_path}/h.db", data_dir=tmp_path,
                  master_key_file=tmp_path / "master.key")
-    app = create_app(s, proxmox_factory=make_fake_factory(fake))
+    # A few tests here need a second host (rename clashes, listing), which is
+    # the Pro flag. The refusal itself is covered in
+    # test_entitlement_denied_branches.py.
+    app = entitle(create_app(s, proxmox_factory=make_fake_factory(fake)),
+                  "hosts.multi")
     with TestClient(app) as c:
         bootstrap_admin(c)
         yield c, fake

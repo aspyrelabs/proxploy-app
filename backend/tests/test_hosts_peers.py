@@ -42,6 +42,7 @@ def peers_app(tmp_path, monkeypatch, bootstrap_admin, csrf_header):
     from proxploy.api.auth import limiter
     from proxploy.config import Settings
     from proxploy.main import create_app
+    from tests.support import entitle
 
     fakes = {ORIGIN: _fake(), PEER: _fake()}
     fakes[ORIGIN].cluster_status_rows = CLUSTER_ROWS
@@ -73,7 +74,10 @@ def peers_app(tmp_path, monkeypatch, bootstrap_admin, csrf_header):
     limiter.reset()
     s = Settings(db_url=f"sqlite:///{tmp_path}/t.db", data_dir=tmp_path,
                  master_key_file=tmp_path / "master.key", poll_enabled=False)
-    app = create_app(s, proxmox_factory=factory)
+    # Peer enrolment IS the multi-host feature, so this whole file needs the
+    # Pro flag; test_enrolment_is_refused_without_the_multi_host_entitlement
+    # below turns it back off to cover the other side.
+    app = entitle(create_app(s, proxmox_factory=factory), "hosts.multi")
     with TestClient(app) as c:
         bootstrap_admin(c)
         r = c.post("/api/v1/hosts", json={

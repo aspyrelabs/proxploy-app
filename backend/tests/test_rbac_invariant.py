@@ -9,7 +9,7 @@ import re
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
-from tests.support import make_app
+from tests.support import entitle, make_app
 
 # Routes that legitimately carry no authorize() dependency. Every entry needs
 # a reason. Self-service auth = "acting on my own account", which no role can
@@ -219,7 +219,10 @@ def test_a_viewer_api_key_cannot_mutate_anything(tmp_path, csrf_header):
     was above -- this repeats that walk with the ONLY variable changed:
     authentication is bearer, not cookie, with the session logged out first
     so no cookie exists to fall back on."""
-    app = make_app(tmp_path)
+    # Bearer auth is the Team tier (api.tokens), and this walk is about what a
+    # viewer's key may do once it exists, not about who may mint one. Without
+    # the grant the key never gets created and the walk silently tests nothing.
+    app = entitle(make_app(tmp_path), "api.tokens")
     with TestClient(app) as c:
         h = csrf_header(c)
         c.post("/api/v1/users", json={"email": "o2@x.io",

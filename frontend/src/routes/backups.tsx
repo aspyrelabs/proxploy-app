@@ -320,8 +320,7 @@ function RetentionSection({ data, pending }: {
 
   return (
     <div className="mt-4">
-      <LockVeil locked={locked}
-        title="Retention preview is a Pro feature"
+      <LockVeil locked={locked} feature="backups.retention"
         subtitle="See exactly which archives a keep-rule would drop, before anything is deleted.">
         <section className={card}>
           <h2 className="font-display text-[16px] font-semibold">Retention preview</h2>

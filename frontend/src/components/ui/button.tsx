@@ -53,20 +53,25 @@ type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
 }
 
 // forwardRef so Radix `asChild` triggers (Tooltip, Popover, DropdownMenu) can attach a ref.
+/**
+ * The button skin, without the <button>. For the rare control that must be a
+ * real <a> (an external link the browser should treat as navigation, so
+ * middle-click and "copy link" work) but should look like a button.
+ *
+ * cn (tailwind-merge), not a template string: concatenation let CSS file order
+ * decide conflicts (`.px-3\.5` after `.px-2`), so a caller's className lost;
+ * cn makes the caller win.
+ */
+export function buttonCls(variant: keyof typeof variants = 'primary',
+                          size: keyof typeof sizes = 'md', className = '') {
+  return cn(
+    // whitespace-nowrap: a label is a phrase; breaking mid-phrase ("Set up"
+    // -> "Set"/"up") reads as two buttons. A caller can still wrap via className.
+    'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-ctl cursor-pointer transition disabled:opacity-50 disabled:cursor-not-allowed',
+    sizes[size], variants[variant], className)
+}
+
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
   { variant = 'primary', size = 'md', className = '', ...props }, ref) {
-  return (
-    <button
-      ref={ref}
-      // cn (tailwind-merge), not a template string: concatenation let CSS file
-      // order decide conflicts (`.px-3\.5` after `.px-2`), so a caller's
-      // className lost; cn makes the caller win.
-      className={cn(
-        // whitespace-nowrap: a label is a phrase; breaking mid-phrase ("Set up"
-        // -> "Set"/"up") reads as two buttons. A caller can still wrap via className.
-        'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-ctl cursor-pointer transition disabled:opacity-50 disabled:cursor-not-allowed',
-        sizes[size], variants[variant], className)}
-      {...props}
-    />
-  )
+  return <button ref={ref} className={buttonCls(variant, size, className)} {...props} />
 })

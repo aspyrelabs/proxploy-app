@@ -282,8 +282,7 @@ function HostNetworkSection({ nodes, pending }: { nodes: NodeIfaces[]; pending: 
 
   return (
     <div className="mt-4">
-      <LockVeil locked={locked}
-        title="Host network editing is a Pro feature"
+      <LockVeil locked={locked} feature="network.host_config"
         subtitle="Create bridges and VLANs on the node itself, then apply them.">
         <section className={card}>
           <h2 className="font-display text-[16px] font-semibold">Host bridges &amp; VLANs</h2>

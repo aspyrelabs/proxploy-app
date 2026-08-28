@@ -6,7 +6,7 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, field_validator
 
-from proxploy.api.deps import authorize, get_db, scope_host
+from proxploy.api.deps import authorize, entitlement_error, get_db, scope_host
 from proxploy.api.jobs import enqueue_and_audit
 from proxploy.models import Host, HostCredential, Team, User, to_iso, utcnow
 from proxploy.services.audit import write_audit
@@ -261,8 +261,7 @@ def create_host(request: Request, body: HostIn, db=Depends(get_db),
                 user: User = Depends(_manage_global)):
     ent = request.app.state.entitlements
     if db.query(Host).count() >= 1 and not ent.enabled("hosts.multi"):
-        raise HTTPException(403, {"error": "entitlement_required",
-                                  "feature": "hosts.multi"})
+        raise entitlement_error("hosts.multi")
     if body.ssh_enroll and not body.ssh_consent:
         raise HTTPException(400, "SSH enrolment requires explicit consent "
                                  "(ssh_consent: true). " + CONSENT_NOTE)
@@ -1241,8 +1240,7 @@ def enrol_peers(request: Request, host_id: int, body: PeerEnrolIn,
     # A peer is never the first host, so unlike create_host the entitlement is
     # always required. Same body, so a caller has one shape to handle.
     if not request.app.state.entitlements.enabled("hosts.multi"):
-        raise HTTPException(403, {"error": "entitlement_required",
-                                  "feature": "hosts.multi"})
+        raise entitlement_error("hosts.multi")
 
     ss = request.app.state.secretstore
     ip = request.client.host if request.client else None

@@ -34,13 +34,26 @@ UNENFORCED = {
     "platform.install",
     "store.install_log", "apps.logs", "apps.graphs", "vms.graphs",
     "backups.schedule", "backups.notify", "notify.routing", "notify.inapp",
-    "audit.retention", "store.search", "alerts.manage", "metrics.collect",
+    "store.search", "alerts.manage", "metrics.collect",
+    # the feature does not exist. It also carried an unenforced tier split
+    # until 2026-08-28; restore that split in the commit that ships the
+    # feature, not before. See PXP-119.
+    "audit.retention",
     # baseline: present in every tier, a gate would never fire
     "auth.local", "ui.theme", "apps.list", "apps.detail", "apps.open_ui",
-    "vms.list", "platform.onboarding", "platform.settings", "api.rest",
+    "vms.list", "platform.onboarding", "platform.settings",
     "hosts.onboard", "hosts.manage", "cluster.overview", "cluster.node_detail",
-    "jobs.engine", "rbac.roles", "secrets.store", "ent.client", "ent.manage",
+    "jobs.engine", "secrets.store", "ent.client", "ent.manage",
     "hosts.ssh_executor",
+    # baseline, restored 2026-08-28. These two briefly carried a tier split
+    # that nothing enforced, which let the pricing page promise something the
+    # product could not withhold. The split is gone; the keys stay registered
+    # because keys never change once shipped.
+    "api.rest",      # never make this a gate: it is the whole REST surface the
+                     # UI itself runs on, so gating it would take the frontend
+                     # away from every free install.
+    "rbac.roles",    # redundant as a second gate: teams.rbac already covers the
+                     # only surface that assigns a role. See PXP-117.
     # feature was removed: the ActivityFeed component, GET /cluster/activity
     # and the query key that fed them were all deleted together. The key stays
     # registered so the shipped flag list does not change under a licence.

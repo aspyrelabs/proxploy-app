@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 
 import jwt
 
-from proxploy.entitlements.registry import DEFAULT_FEATURES
+from proxploy.entitlements.registry import FREE_FEATURES
 from proxploy.models import EntitlementCache, utcnow
 from proxploy.pubkey import load_public_key, to_pem
 
@@ -103,9 +103,16 @@ class EntitlementStatus:
 
 
 class Entitlements:
-    def __init__(self, roots: dict[str, str]):
+    def __init__(self, roots: dict[str, str],
+                 baseline: dict[str, bool] | None = None):
         self._roots = roots
-        self._features: dict[str, bool] = dict(DEFAULT_FEATURES)
+        # The floor this install falls back to with no token, a bad one, or one
+        # past grace. Defaults to the free/Homelab map; registry.DEV_FEATURES is
+        # the explicit opt-in for local work with every gate open. Never derive
+        # this from an env setting: a dev box that silently runs all-on is how
+        # denied branches go untested until a customer finds them.
+        self._baseline = dict(baseline if baseline is not None else FREE_FEATURES)
+        self._features: dict[str, bool] = dict(self._baseline)
         self._status = EntitlementStatus(tier="builtin", source="builtin")
         self.refresh_error: str | None = None
 
@@ -156,7 +163,7 @@ class Entitlements:
             clock_skew=_ts(claims["iat"]) > now + LEEWAY)
 
     def reset_builtin(self, reason: str | None = None, clock_skew: bool = False) -> None:
-        self._features = dict(DEFAULT_FEATURES)
+        self._features = dict(self._baseline)
         self._status = EntitlementStatus(tier="builtin", source="builtin",
                                          reason=reason, clock_skew=clock_skew)
 

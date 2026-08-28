@@ -82,7 +82,9 @@ vi.mock('../api/client', () => ({
       return Promise.resolve([])
     }
     if (path === '/entitlements') {
-      return Promise.resolve({ tier: 'pro', features, grace: null, clock_skew: false })
+      return Promise.resolve({ tier: 'pro', features,
+                               required_tier: { 'hosts.multi': 'pro' },
+                               grace: null, clock_skew: false })
     }
     if (path === '/cluster/summary') {
       if (summaryResult === 'error') return Promise.reject(new Error('boom'))
@@ -419,7 +421,11 @@ describe('HostsPage', () => {
     features = {}
     withQuery(<HostsPage />)
     fireEvent.click(await screen.findByRole('button', { name: 'Add host' }))
-    expect(await screen.findByText(/needs the multi-host plan/i)).toBeInTheDocument()
+    expect(await screen.findByText('This is a Pro feature')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /Please upgrade/i }))
+      .toHaveAttribute('href', 'https://proxploy.com/#pricing')
+    // The form is replaced, not blurred behind the veil: a token field a
+    // screen reader can still reach is a form the operator can still fill in.
     expect(screen.queryByLabelText('Monitoring token id')).not.toBeInTheDocument()
   })
 

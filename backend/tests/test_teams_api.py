@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from proxploy.models import AuditEvent, Host, Team, TeamMember, User
-from tests.support import make_app
+from tests.support import entitle, make_app
 
 
 def _mk_user(client, csrf_header, email, role, password="Correct-Horse-Battery-9"):
@@ -28,7 +28,9 @@ def _logout(client, csrf_header):
 
 @pytest.fixture
 def app_client(tmp_path, csrf_header, bootstrap_admin):
-    app = make_app(tmp_path)
+    # Teams and roles are the Team tier. The refusal below that tier is
+    # test_entitlement_denied_branches.py's job, not this file's.
+    app = entitle(make_app(tmp_path), "teams.rbac")
     with TestClient(app) as c:
         bootstrap_admin(c)   # owner session, default team
         yield c

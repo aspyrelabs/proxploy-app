@@ -7,7 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from proxploy.models import ApiKey, App, AuditEvent, User
-from tests.support import make_app, seed_host_row
+from tests.support import entitle, make_app, seed_host_row
 
 
 def _mk_user(client, csrf_header, email, role, password="Correct-Horse-Battery-9"):
@@ -35,7 +35,9 @@ def _seed_app(app_obj):
 
 @pytest.fixture
 def app_client(tmp_path, csrf_header, bootstrap_admin):
-    app = make_app(tmp_path)
+    # API keys are a Team feature. This file is about what a key can do once
+    # it exists, not about who may mint one.
+    app = entitle(make_app(tmp_path), "api.tokens")
     with TestClient(app) as c:
         bootstrap_admin(c)             # owner session, default team
         yield app, c
@@ -234,7 +236,7 @@ def test_key_is_capped_by_owners_role_not_a_second_grant(tmp_path, csrf_header,
     """A viewer's unscoped key still cannot PATCH a host: empty scopes means
     'full user rights' (doc 04), and the user's own rights top out at viewer.
     Proves a key can only narrow, never widen, its owner's role."""
-    app = make_app(tmp_path)
+    app = entitle(make_app(tmp_path), "api.tokens")
     with TestClient(app) as c:
         bootstrap_admin(c)
         with app.state.sessionmaker() as db:

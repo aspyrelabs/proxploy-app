@@ -1,6 +1,8 @@
 import { Dialog } from './ui/dialog'
 import { HostForm, type HostCreated } from './HostForm'
 import { Icon } from './ui/icon'
+import { LockVeil } from './LockVeil'
+import { SkeletonField } from './ui/skeleton'
 
 export function AddHostDialog({ blocked = false, onClose, onCreated }: {
   /** One host is included; a second needs the multi-host plan. Shown instead
@@ -27,13 +29,22 @@ export function AddHostDialog({ blocked = false, onClose, onCreated }: {
         </span>}>
       {blocked ? (
         <div className="mt-4">
-          <p className="text-[13px] text-text-2">
-            Managing more than one host needs the multi-host plan.
-          </p>
-          <p className="mt-1 text-[12px] text-text-3">
-            One host is included. Every node of that host&rsquo;s cluster is already
-            managed here, at no extra tier.
-          </p>
+          {/* The skeleton is the host FORM's shape, not a table: this dialog
+              is where someone came to fill that form in, and the placeholder
+              should be the thing they were reaching for. */}
+          <LockVeil locked feature="hosts.multi"
+            subtitle={'One host is included, and every node of its cluster with it. '
+                      + 'A second host is where the multi-host plan starts.'}
+            skeleton={<div aria-hidden className="space-y-3 p-1">
+              <SkeletonField label="w-16" />
+              <SkeletonField label="w-24" />
+              <div className="grid grid-cols-2 gap-3">
+                <SkeletonField label="w-20" />
+                <SkeletonField label="w-20" />
+              </div>
+            </div>}>
+            <></>
+          </LockVeil>
         </div>
       ) : (
         <HostForm onCreated={onCreated} />

@@ -22,7 +22,7 @@ from fastapi.testclient import TestClient
 
 from proxploy.jobs import TERMINAL
 from tests.fakes.pve import FakePVE
-from tests.support import make_app
+from tests.support import entitle, make_app
 
 HOST = {"name": "pve-01", "address": "https://10.0.0.5:8006",
         "token_id": "proxploy@pve!mon", "token_secret": "s3cret"}
@@ -44,7 +44,9 @@ def _bearer(client, method, path, headers, **kw):
 def test_ci_drives_the_product_end_to_end_over_bearer_only(
         tmp_path, csrf_header, bootstrap_admin):
     fake = FakePVE()
-    app = make_app(tmp_path, fake=fake)
+    # Driving the product over bearer auth needs the Team tier that sells
+    # bearer auth.
+    app = entitle(make_app(tmp_path, fake=fake), "api.tokens")
 
     with TestClient(app) as cookie_client, TestClient(app) as bearer:
         # --- one-time cookie bootstrap: owner signup + API key mint ---

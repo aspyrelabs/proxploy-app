@@ -27,11 +27,16 @@ def _make_app(tmp_path, fakes: dict):
     from proxploy.config import Settings
     from proxploy.main import create_app
     from tests.fakes.pve import make_addressed_factory
+    from tests.support import entitle
 
     limiter.reset()
     s = Settings(db_url=f"sqlite:///{tmp_path}/t.db", data_dir=tmp_path,
                 master_key_file=tmp_path / "master.key", poll_enabled=False)
-    return create_app(s, proxmox_factory=make_addressed_factory(fakes))
+    # Cross-host migration is Pro, and so is having a second host to migrate
+    # to. This file is about the migration mechanics, not the tier boundary,
+    # which test_entitlement_denied_branches.py covers.
+    return entitle(create_app(s, proxmox_factory=make_addressed_factory(fakes)),
+                   "hosts.multi", "migrate.cross_host", "migrate.preflight")
 
 
 def _seed(app, *, src_node="pve-src", tgt_node="pve-tgt", ctid=150, name="immich"):

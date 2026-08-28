@@ -34,9 +34,10 @@ def _seed(app, *, vm_name="win11", vm_status="stopped"):
 
 def _authed(tmp_path, bootstrap_admin, **kw):
     from tests.fakes.pve import FakePVE
-    from tests.support import make_app, seed_snapshot
+    from tests.support import entitle, make_app, seed_snapshot
 
-    app = make_app(tmp_path, fake=FakePVE())
+    # api.tokens so the api_key row this file names can be created at all.
+    app = entitle(make_app(tmp_path, fake=FakePVE()), "api.tokens")
     c = TestClient(app)
     c.__enter__()
     bootstrap_admin(c)

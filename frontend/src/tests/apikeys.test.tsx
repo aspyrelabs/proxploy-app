@@ -17,7 +17,10 @@ vi.mock('../api/client', async (importOriginal) => ({
   api: vi.fn((path: string, opts?: RequestInit) => {
     const method = opts?.method
     if (path === '/entitlements') {
-      return Promise.resolve({ tier: 'builtin', features: { 'api.tokens': tokensAllowed }, grace: null, clock_skew: false })
+      return Promise.resolve({
+        tier: 'builtin', features: { 'api.tokens': tokensAllowed },
+        required_tier: tokensAllowed ? {} : { 'api.tokens': 'team' },
+        grace: null, clock_skew: false })
     }
     if (path === '/api-keys' && !method) {
       if (listError) return Promise.reject(new ApiError(502, { detail: 'boom' }))
@@ -69,7 +72,11 @@ describe('ApiKeysCard', () => {
   it('gates the whole card behind api.tokens: no fetch, plan message shown', async () => {
     tokensAllowed = false
     wrap()
-    expect(await screen.findByText('Not included in your plan.')).toBeInTheDocument()
+    // Team, not Pro: api.tokens moved tier on 2026-08-28 and nothing in this
+    // component had to change, because the tier comes from the payload.
+    expect(await screen.findByText('This is a Team feature')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /Please upgrade/i }))
+      .toHaveAttribute('href', 'https://proxploy.com/#pricing')
     expect(calls.some((c) => c.path === '/api-keys')).toBe(false)
     expect(screen.queryByRole('button', { name: 'New key' })).toBeNull()
   })

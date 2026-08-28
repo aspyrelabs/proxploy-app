@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const BRIDGES = {
   nodes: [{
@@ -55,9 +55,15 @@ const THROUGHPUT = {
 }
 
 const calls: { path: string; method: string; body: any }[] = []
-let features: Record<string, boolean> = {
+const ALL_ON = {
   'network.view': true, 'network.guest_config': true, 'network.host_config': true,
 }
+let features: Record<string, boolean> = { ...ALL_ON }
+let requiredTier: Record<string, string> = {}
+
+// Reset here, not on the last line of the test that changes it: an assertion
+// that throws never reaches that line, and the next test inherits the flags.
+afterEach(() => { features = { ...ALL_ON }; requiredTier = {} })
 
 vi.mock('../api/client', () => {
   class ApiError extends Error {
@@ -72,7 +78,8 @@ vi.mock('../api/client', () => {
       const method = (opts?.method ?? 'GET').toUpperCase()
       const body = opts?.body ? JSON.parse(String(opts.body)) : {}
       if (path === '/entitlements') {
-        return Promise.resolve({ tier: 'builtin', features, grace: null, clock_skew: false })
+        return Promise.resolve({ tier: 'builtin', features, required_tier: requiredTier,
+                                 grace: null, clock_skew: false })
       }
       if (method !== 'GET') calls.push({ path, method, body })
       if (path.startsWith('/network/bridges') && method === 'GET') {
@@ -218,10 +225,18 @@ describe('NetworkPage host config', () => {
   it('veils the host bridge editor when network.host_config is not entitled', async () => {
     calls.length = 0
     features = { 'network.view': true, 'network.guest_config': true }
+    requiredTier = { 'network.host_config': 'pro' }
     wrap()
-    expect(await screen.findByText(/Host network editing is a Pro feature/i)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Unlock Pro/i })).toBeInTheDocument()
-    features = { 'network.view': true, 'network.guest_config': true, 'network.host_config': true }
+    // The tier comes from the payload, not from a string in the route: this
+    // veil said "Pro" in its own markup until 2026-08-29, which is how it
+    // would have gone on saying Pro after the feature moved tier.
+    expect(await screen.findByText('This is a Pro feature')).toBeInTheDocument()
+    const upgrade = screen.getByRole('link', { name: /Please upgrade/i })
+    expect(upgrade).toHaveAttribute('href', 'https://proxploy.com/#pricing')
+    expect(upgrade).toHaveAttribute('target', '_blank')
+    // The panel's own content is NOT rendered underneath: the queries behind
+    // it would 403, so there is nothing to blur and nothing to leak.
+    expect(screen.queryByRole('table', { name: 'Interfaces on pve1' })).toBeNull()
   })
 
   it('lists every interface type in the host section, not just bridges', async () => {

@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { BackupsResponse } from '../api/backups'
 
@@ -51,10 +51,20 @@ const PRUNE = [
 ]
 
 const calls: { path: string; method: string; body: any }[] = []
-let features: Record<string, boolean> = {
+// storage.manage is in here because the "Add storage" button opens the real
+// StorageForm, which is gated on it. It used to be absent and the test still
+// passed, because the veil rendered the form underneath itself; it does not
+// any more, and a test about the form's default state should not be running
+// against a gated form anyway.
+const ALL_ON = {
   'backups.pbs': true, 'backups.run': true, 'backups.restore': true,
-  'backups.retention': true,
+  'backups.retention': true, 'storage.manage': true,
 }
+let features: Record<string, boolean> = { ...ALL_ON }
+
+// Reset here, not on the last line of the test that narrows it: an assertion
+// that throws never reaches that line and the next test inherits the flags.
+afterEach(() => { features = { ...ALL_ON } })
 /** which 409 the next in-place restore should hit, if any */
 let restoreGuard: 'confirm' | 'self' | null = null
 /** GET /backups' own `stale` flag: location 2's ring only ever polls while
@@ -94,7 +104,9 @@ vi.mock('../api/client', () => {
       const method = (opts?.method ?? 'GET').toUpperCase()
       const body = opts?.body ? JSON.parse(String(opts.body)) : {}
       if (path === '/entitlements') {
-        return Promise.resolve({ tier: 'builtin', features, grace: null, clock_skew: false })
+        return Promise.resolve({ tier: 'builtin', features,
+                                 required_tier: { 'backups.retention': 'pro' },
+                                 grace: null, clock_skew: false })
       }
       if (method !== 'GET') calls.push({ path, method, body })
       if (path === '/backups') return Promise.resolve({ ...BACKUPS, stale: backupsStale })
@@ -455,8 +467,9 @@ describe('BackupsPage', () => {
     calls.length = 0
     features = { 'backups.pbs': true, 'backups.run': true, 'backups.restore': true }
     const veiled = wrap()
-    expect(await screen.findByText(/Retention preview is a Pro feature/i)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Unlock Pro/i })).toBeInTheDocument()
+    expect(await screen.findByText('This is a Pro feature')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /Please upgrade/i }))
+      .toHaveAttribute('href', 'https://proxploy.com/#pricing')
     veiled.unmount()
 
     features = { 'backups.pbs': true, 'backups.run': true, 'backups.restore': true,

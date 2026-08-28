@@ -18,7 +18,7 @@ from proxploy.models import AuditEvent, TeamMember, User
 from proxploy.services import oidc
 from proxploy.services.authn import hash_password
 from tests.fakes.oidc import ISSUER, make_idp
-from tests.support import make_job_app
+from tests.support import entitle, make_job_app
 
 REDIRECT_URI = "https://app.test/callback"
 
@@ -300,6 +300,7 @@ def test_oidc_login_and_callback_round_trip_creates_a_jit_session(client, csrf_h
     GET /callback -> session cookie + 307 to "/" -> GET /auth/me resolves the
     JIT-provisioned viewer."""
     bootstrap_admin(client)
+    entitle(client.app, "auth.oidc")   # OIDC is the Team tier
     idp = _configure_via_api(client, csrf_header, default_role="viewer",
                              sub="alice-1", email="alice@example.com", name="Alice")
     client.cookies.delete("pp_session")  # the owner session must not matter below
@@ -360,6 +361,7 @@ def test_oidc_pending_approval_gets_its_own_redirect_and_grants_no_session(
     same undifferentiated "?error=oidc" every other failure gets; it is not
     a login failure, it is a successful sign-up awaiting an administrator."""
     bootstrap_admin(client)
+    entitle(client.app, "auth.oidc")   # OIDC is the Team tier
     idp = _configure_via_api(client, csrf_header, sub="pending-1",
                              email="pending@example.com")  # no default_role
     client.cookies.delete("pp_session")

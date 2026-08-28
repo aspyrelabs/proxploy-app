@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 from sqlalchemy import func
 
-from proxploy.api.deps import authorize, get_db, require_entitlement
+from proxploy.api.deps import authorize, entitlement_error, get_db, require_entitlement
 from proxploy.api.jobs import job_out
 from proxploy.jobs import HANDLERS
 from proxploy.jobs.scheduler import BadSchedule, _target, job_params, next_fire
@@ -83,8 +83,7 @@ def _get(db, schedule_id: int) -> Schedule:
 def _check_auto_update(request: Request, job_kind: str) -> None:
     if (job_kind == AUTO_UPDATE_KIND
             and not request.app.state.entitlements.enabled("store.auto_update")):
-        raise HTTPException(403, {"error": "entitlement_required",
-                                  "feature": "store.auto_update"})
+        raise entitlement_error("store.auto_update")
 
 
 def _validated(cron: str, tz: str, job_kind: str) -> None:
