@@ -211,7 +211,6 @@ export function HostForm({ onCreated }: { onCreated: (h: HostCreated) => void })
 
   return (
     <form onSubmit={submit} className="mt-4 space-y-3">
-      <h3 className={BAND.replace('border-t border-line-soft pt-3 ', '')}>The node</h3>
       {([['name', 'Name', 'pve-01'], ['address', 'Address', 'https://10.0.0.5:8006']] as const)
         .map(([k, label, ph]) => (
         <div key={k}>
@@ -225,7 +224,7 @@ export function HostForm({ onCreated }: { onCreated: (h: HostCreated) => void })
         <input type="checkbox" checked={f.verify_tls}
           onChange={e => set('verify_tls', e.target.checked)} /> Verify TLS certificate
       </label>
-      <h3 className={BAND}>What Proxploy may do here</h3>
+      <h3 className={BAND}>API access token</h3>
       {/* One box for all four capability tokens. Monitoring is mandatory and
               creates the host, so its row always renders; the other three are
               optional and only appear once ticked. */}
@@ -234,29 +233,34 @@ export function HostForm({ onCreated }: { onCreated: (h: HostCreated) => void })
                   left unticked gets no role and no token at all. Unticking one
                   shows what it would have covered, right under it. */}
         <div className="mt-2 space-y-1.5">
-          <p className="text-[11.5px] text-text-3">Read-only monitoring is always included.</p>
-          {capChoices.map(({ key, label, why }) => {
-            const ticked = caps.includes(key)
-            return (
-              <label key={key} className="flex items-start gap-1.5 text-[11.5px] text-text-2">
-                <input type="checkbox" className="mt-0.5" checked={ticked}
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+            {/* Shown, ticked and not tickable: Proxploy cannot read a host at
+                all without it, so leaving it out of the row read as a choice
+                nobody was offered. */}
+            <label className="flex items-center gap-1.5 text-[11.5px] text-text-3">
+              <input type="checkbox" checked readOnly disabled />
+              Monitoring
+            </label>
+            {capChoices.map(({ key, label }) => (
+              <label key={key} className="flex items-center gap-1.5 text-[11.5px] text-text-2">
+                <input type="checkbox" checked={caps.includes(key)}
                   onChange={e => setCaps(cs => e.target.checked
                     ? [...cs, key] : cs.filter(c => c !== key))} />
-                <span>
-                  {label}
-                  {/* `why` only exists once the catalog has loaded; while it
-                      is still the fallback there is nothing to show, which
-                      is why this is a plain checkbox with no text below it
-                      in that state. */}
-                  {!ticked && why && (
-                    <span className="block text-[11px] text-text-3">
-                      Without a token for {label}, this will not work: {why}
-                    </span>
-                  )}
-                </span>
+                {label}
               </label>
-            )
-          })}
+            ))}
+          </div>
+          <p className="text-[11.5px] text-text-3">
+            Monitoring is the least Proxploy needs to read a host, so it is always included.
+          </p>
+          {/* `why` only exists once the catalog has loaded; while it is still
+              the fallback there is nothing to say, which is why an unticked
+              capability shows no line in that state. */}
+          {capChoices.filter(c => !caps.includes(c.key) && c.why).map(({ key, label, why }) => (
+            <p key={key} className="text-[11px] text-text-3">
+              Without a token for {label}, this will not work: {why}
+            </p>
+          ))}
         </div>
         {/* Monitoring's row always renders below, it is mandatory and creates
                   the host. Optional capabilities only show when ticked: an
