@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import type { AppRow } from '../api/hooks'
-import { fmtBps, fmtBytes, fmtPct } from '../lib/format'
+import { fmtBps, fmtBytesPair, fmtPct } from '../lib/format'
 import { IconTile } from './IconTile'
 import { AppActionBar } from './AppActionBar'
 import { AppDetailPanel } from './AppDetailPanel'
@@ -128,11 +128,12 @@ function AppTableRow({ app, open, onToggle }: {
       <td className={td}><Meter pct={app.cpu_pct} gradient={CPU_GRADIENT} /></td>
       <td className={td}><Meter pct={memPct} gradient={RAM_GRADIENT} /></td>
       <td className={td}>
-        <Meter pct={diskPct} gradient={STORAGE_GRADIENT} />
-        <div className="font-mono text-[11px] text-text-3">
-          {app.disk_total_bytes
-            ? `${fmtBytes(app.disk_bytes)} / ${fmtBytes(app.disk_total_bytes)}`
-            : fmtBytes(app.disk_bytes)}
+        <div className="relative">
+          <Meter pct={diskPct} gradient={STORAGE_GRADIENT} />
+          <span className="absolute left-0 top-full whitespace-nowrap font-mono
+                           text-[11px] text-text-3">
+            {fmtBytesPair(app.disk_bytes, app.disk_total_bytes)}
+          </span>
         </div>
       </td>
       {/* No bar: a rate has no denominator to draw one against. Stacked

@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import type { VmRow } from '../api/hooks'
-import { fmtBps, fmtBytes, fmtPct } from '../lib/format'
+import { fmtBps, fmtBytesPair, fmtPct } from '../lib/format'
 import { osIconUrl } from '../lib/os-icon'
 import { IconTile } from './IconTile'
 import { StatusPill } from './StatusPill'
@@ -147,14 +147,13 @@ function VmTableRow({ vm, open, onToggle }: {
             unknown <InfoHint text={NO_AGENT} />
           </span>
         ) : (
-          <>
+          <div className="relative">
             <Meter pct={diskPct} gradient={STORAGE_GRADIENT} />
-            <div className="font-mono text-[11px] text-text-3">
-              {vm.disk_total_bytes
-                ? `${fmtBytes(vm.disk_bytes)} / ${fmtBytes(vm.disk_total_bytes)}`
-                : fmtBytes(vm.disk_bytes)}
-            </div>
-          </>
+            <span className="absolute left-0 top-full whitespace-nowrap font-mono
+                             text-[11px] text-text-3">
+              {fmtBytesPair(vm.disk_bytes, vm.disk_total_bytes)}
+            </span>
+          </div>
         )}
       </td>
       {/* No bar: a rate has no denominator to draw one against.

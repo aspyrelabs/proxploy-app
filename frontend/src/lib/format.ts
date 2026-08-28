@@ -10,6 +10,14 @@ export function fmtBytes(n?: number | null): string {
   return `${v.toFixed(1)} ${units[i]}`
 }
 
+export function fmtBytesPair(used?: number | null, total?: number | null): string {
+  const a = fmtBytes(used)
+  if (total == null) return a
+  const b = fmtBytes(total)
+  const [value, unit] = a.split(' ')
+  return unit && unit === b.split(' ')[1] ? `${value} / ${b}` : `${a} / ${b}`
+}
+
 export function fmtUptime(s?: number | null): string {
   if (s == null || s <= 0) return UNKNOWN
   const d = Math.floor(s / 86400)
