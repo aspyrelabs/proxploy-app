@@ -28,9 +28,10 @@ const TYPE_LABEL: Record<string, string> = {
 // on purpose (Proxmox is the authority on what a plugin accepts), so this map
 // is a CONVENIENCE, not a schema: an unlisted key is a missing input here, not
 // a rejected request there.
-const FIELDS: Record<string, [string, string, string][]> = {
+const FIELDS: Record<string, [string, string, string, string?][]> = {
   dir: [['path', 'Path', 'text']],
-  nfs: [['server', 'Server', 'text'], ['export', 'Export', 'text']],
+  nfs: [['server', 'Server', 'text'], ['export', 'Export', 'text'],
+        ['options', 'Mount options', 'text', 'optional, for example vers=4.2']],
   cifs: [['server', 'Server', 'text'], ['share', 'Share', 'text'],
          ['username', 'Username', 'text'], ['password', 'Password', 'password']],
   pbs: [['server', 'Server', 'text'], ['datastore', 'Datastore', 'text'],
@@ -88,7 +89,7 @@ export function StorageForm({ existing, onClose }:
   })
   const set = (k: string, v: string) => setCfg((s) => ({ ...s, [k]: v }))
 
-  const fields: [string, string, string][] = FIELDS[type] ?? []
+  const fields: [string, string, string, string?][] = FIELDS[type] ?? []
   // `content` stays a comma string in state, the shape both PVE and the rest
   // of this form already speak; the checkboxes below are just a view of it.
   const ticked = new Set((cfg.content ?? '').split(',').map((c) => c.trim()).filter(Boolean))
@@ -191,11 +192,12 @@ export function StorageForm({ existing, onClose }:
               <option value={type}>{type === '' ? 'unknown' : type}</option>}
           </select>
         </div>
-        {fields.map(([k, label, inputType]) => (
+        {fields.map(([k, label, inputType, placeholder]) => (
           <div key={k}>
             <label htmlFor={`sf-${k}`}
               className="mb-1 block text-[11px] uppercase tracking-wide text-text-3">{label}</label>
             <input id={`sf-${k}`} className={inputCls} type={inputType}
+              placeholder={placeholder}
               value={cfg[k] ?? ''} onChange={(e) => set(k, e.target.value)} />
           </div>
         ))}
