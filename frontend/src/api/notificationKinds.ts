@@ -23,6 +23,9 @@ export type KindField = {
    *  placeholder server-side, so never empty. Matters most on secret fields,
    *  where a password box shows no placeholder. */
   example: string
+  /** 'text' or 'toggle'. The only toggle is `tls`, which picks the https
+   *  spelling of the scheme for a service the operator hosts themselves. */
+  type: string
 }
 
 /** No guided field takes a whole URL: each one is a single component the
@@ -36,6 +39,7 @@ const URLISH = /[A-Za-z][A-Za-z0-9+.-]*:\/\//
  *  it is the required check's business, and a pattern the browser cannot
  *  compile must never make a field permanently unfillable. */
 export function fieldError(field: KindField, value: string): string | null {
+  if (field.type === 'toggle') return null
   if (!value) return null
   if (URLISH.test(value)) {
     return `${field.label} takes a single value, not a whole URL. `

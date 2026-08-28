@@ -19,7 +19,8 @@ SAMPLES: dict[str, dict] = {
     "ntfy": {"host": "ntfy.sh", "topic": "proxploy-alerts"},
     "gotify": {"host": "gotify.example.com:8080", "token": "AbCdEfGhIjKlMnO"},
     "email": {"host": "smtp.example.com", "user": "alerts@example.com",
-              "password": "s3cr3t", "to": "ops@example.com"},
+              "password": "s3cr3t", "from_email": "alerts@example.com",
+              "to": "ops@example.com"},
     "telegram": {"bot_token": "123456789:AAHrLHtM3vJqPpAaBbCcDdEeFfGgHhIiJjK",
                  "chat_id": "123456789"},
     "slack": {"token_a": "T1234567890", "token_b": "B1234567890",
@@ -65,6 +66,33 @@ def test_built_url_is_one_apprise_accepts(service):
 
 
 @pytest.mark.parametrize("service", CATALOG, ids=lambda s: s.kind)
+def test_tls_is_on_by_default_and_can_be_turned_off(service):
+    """The toggle has to reach Apprise as a different scheme, and both
+    spellings have to be ones Apprise takes: a Gotify token crossing the
+    network in the clear is the default this guards against."""
+    on = build_url(service.kind, SAMPLES[service.kind])
+    off = build_url(service.kind, {**SAMPLES[service.kind], "tls": "off"})
+    if not service.secure_scheme:
+        assert on == off
+        return
+    assert on.startswith(f"{service.secure_scheme}://")
+    assert off.startswith(f"{service.scheme}://")
+    assert notifier.parses(off), f"Apprise rejected plain {service.kind}: {off}"
+    assert notifier.kind_for(off) == service.kind
+
+
+def test_email_sender_is_the_address_the_operator_gave():
+    """Apprise glues the username onto the SMTP host when nothing sets `from`,
+    so a login of you@example.com on smtp.example.com sends as
+    you@smtp.example.com, a mailbox that does not exist."""
+    import apprise
+    obj = apprise.Apprise.instantiate(build_url("email", SAMPLES["email"]),
+                                      suppress_exceptions=False)
+    assert obj.from_addr[1] == "alerts@example.com"
+    assert obj.secure_mode == "starttls"
+
+
+@pytest.mark.parametrize("service", CATALOG, ids=lambda s: s.kind)
 def test_kind_survives_the_round_trip_through_kind_for(service):
     """The badge the channel list shows must match the kind the picker offered,
     or a Telegram channel saves and then displays as "webhook"."""
@@ -89,5 +117,6 @@ def test_separators_in_a_secret_cannot_rewrite_the_url():
     somewhere else entirely. Percent-encoding is the whole defence."""
     url = build_url("email", {**SAMPLES["email"], "password": "p@ss/word"})
     assert "p%40ss%2Fword" in url
-    assert url.count("@") == 2  # the user's address, then the userinfo boundary
+    # The user's address, the userinfo boundary, and the from address.
+    assert url.count("@") == 3
     assert notifier.parses(url)

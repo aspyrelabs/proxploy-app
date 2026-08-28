@@ -22,6 +22,19 @@ export function KindFields({ service, values, errors, onChange, idPrefix = 'ch',
       {service.fields.map((f: KindField) => {
         const id = `${idPrefix}-${f.key}`
         const err = errors[f.key]
+        if (f.type === 'toggle') {
+          return (
+            <div key={f.key}>
+              <label className="flex items-center gap-2 text-[12px] text-text-2" htmlFor={id}>
+                <input id={id} type="checkbox"
+                       checked={values[f.key] !== 'off'}
+                       onChange={(e) => onChange(f.key, e.target.checked ? 'on' : 'off')} />
+                {f.label}
+              </label>
+              {f.help && <p className="mt-1 text-[11.5px] text-text-3">{f.help}</p>}
+            </div>
+          )
+        }
         return (
           <div key={f.key}>
             {/* The (i) sits BESIDE the label, not inside it. A button nested

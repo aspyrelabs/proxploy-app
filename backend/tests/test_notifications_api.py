@@ -28,11 +28,11 @@ def test_viewer_role_is_refused(tmp_path, csrf_header, bootstrap_admin):
         bootstrap_admin(c)
         h = csrf_header(c)
         c.post("/api/v1/users", json={"email": "viewer@example.com",
-                                      "password": "correct-horse-battery",
+                                      "password": "Correct-Horse-Battery-9",
                                       "display_name": "Viewer", "role": "viewer"},
                headers=h)
         c.post("/api/v1/auth/login", json={"email": "viewer@example.com",
-                                           "password": "correct-horse-battery"},
+                                           "password": "Correct-Horse-Battery-9"},
                headers=h)
         r = c.post("/api/v1/notifications/channels",
                    json={"name": "n", "url": URL}, headers=csrf_header(c))
@@ -307,6 +307,7 @@ def test_pasted_url_still_works_unchanged(tmp_path, csrf_header, bootstrap_admin
 # --- Master switches (services/notification_prefs.py) -----------------------
 
 def test_types_lists_every_row_with_its_live_value(tmp_path, csrf_header, bootstrap_admin):
+    from proxploy.services.notification_types import TYPES
     from tests.support import make_app
 
     with TestClient(make_app(tmp_path)) as c:
@@ -314,7 +315,9 @@ def test_types_lists_every_row_with_its_live_value(tmp_path, csrf_header, bootst
         r = c.get("/api/v1/notifications/types")
         assert r.status_code == 200
         rows = r.json()["types"]
-        assert len(rows) == 20
+        # Against the catalog, not a number: a count typed by hand goes stale
+        # the next time somebody adds an event, which is what it did.
+        assert len(rows) == len(TYPES)
         by_key = {t["key"]: t for t in rows}
         assert by_key["job.failed"]["enabled"] is True
         assert by_key["job.failed"]["label"] == "Job failed"
@@ -410,7 +413,7 @@ def test_replacing_credentials_reassembles_and_re_encrypts(
         with app.state.sessionmaker() as db:
             row = db.get(NotificationChannel, cid)
         url = app.state.secretstore.decrypt(row.url_enc).decode()
-        assert url == "ntfy://ntfy.sh/second-topic"
+        assert url == "ntfys://ntfy.sh/second-topic"
         # The id is unchanged, so the channel keeps its column in the Events
         # matrix and everything ticked in it. Delete-and-recreate does not.
         assert row.id == cid
@@ -507,7 +510,9 @@ def test_a_saved_channel_gives_its_details_back_except_the_secrets(
         body = r.json()
         assert body["known"] is True
         assert body["kind"] == "gotify"
-        assert body["fields"] == {"host": "gotify.example.com:8080"}
+        # `tls` is backfilled from the saved URL's scheme for a channel
+        # written before the toggle existed.
+        assert body["fields"] == {"host": "gotify.example.com:8080", "tls": "on"}
         assert body["secrets_set"] == ["token"]
         # The secret is reported as set and never as a value, anywhere.
         assert "AbCdEfGhIjKlMnO" not in r.text
@@ -537,7 +542,7 @@ def test_a_blank_secret_on_save_keeps_the_stored_one(
         with app.state.sessionmaker() as db:
             row = db.get(NotificationChannel, cid)
         url = app.state.secretstore.decrypt(row.url_enc).decode()
-        assert url == "gotify://gotify.example.com:9090/AbCdEfGhIjKlMnO"
+        assert url == "gotifys://gotify.example.com:9090/AbCdEfGhIjKlMnO"
 
 
 def test_typing_a_new_secret_replaces_the_old_one(
@@ -583,7 +588,7 @@ def test_changing_service_does_not_carry_the_old_secret_over(
     with app.state.sessionmaker() as db:
         row = db.get(NotificationChannel, cid)
     url = app.state.secretstore.decrypt(row.url_enc).decode()
-    assert url == "ntfy://ntfy.sh/moved"
+    assert url == "ntfys://ntfy.sh/moved"
     assert "AbCdEfGhIjKlMnO" not in url
 
 

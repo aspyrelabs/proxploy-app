@@ -17,7 +17,7 @@ from proxploy.services.audit import write_audit
 from proxploy.services.settings import set_setting
 from proxploy.services.links import PUBLIC_URL_KEY, public_url
 from proxploy.services.notification_catalog import (
-    build_url, public_catalog, secret_keys)
+    BY_KIND, build_url, public_catalog, secret_keys)
 from proxploy.services.notification_prefs import effective, set_overrides
 from proxploy.services.notification_types import BY_KEY, TYPES
 from proxploy.services.notifier import kind_for, parses, send_one
@@ -312,10 +312,20 @@ def channel_fields(request: Request, channel_id: int, db=Depends(get_db)):
         raise HTTPException(404, "channel not found")
     stored = _stored_fields(request, row)
     secrets = secret_keys(row.kind or "")
+    fields = {k: v for k, v in stored.items() if k not in secrets}
+    # A channel saved before the TLS toggle existed has no `tls` value, and the
+    # form's default is on. Reading it back off the stored URL is what stops an
+    # edit that only corrects a typo from also moving a plain-http server to
+    # https and quietly ending delivery.
+    if stored and "tls" not in fields:
+        service = BY_KIND.get(row.kind or "")
+        if service and service.secure_scheme:
+            url = request.app.state.secretstore.decrypt(row.url_enc).decode()
+            fields["tls"] = "on" if url.startswith(f"{service.secure_scheme}://") else "off"
     return {
         "kind": row.kind,
         "known": bool(stored),
-        "fields": {k: v for k, v in stored.items() if k not in secrets},
+        "fields": fields,
         "secrets_set": sorted(k for k in secrets if stored.get(k)),
     }
 

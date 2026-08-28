@@ -22,14 +22,14 @@ def _seed_job(app, **kw):
         return job.id
 
 
-def _mk_user(client, csrf_header, email, password="correct-horse-battery"):
+def _mk_user(client, csrf_header, email, password="Correct-Horse-Battery-9"):
     h = csrf_header(client)
     r = client.post("/api/v1/users", json={"email": email, "password": password},
                     headers=h)
     assert r.status_code == 201, r.text
 
 
-def _login(client, csrf_header, email, password="correct-horse-battery"):
+def _login(client, csrf_header, email, password="Correct-Horse-Battery-9"):
     r = client.post("/api/v1/auth/login", json={"email": email, "password": password},
                     headers=csrf_header(client))
     assert r.status_code == 200, r.text

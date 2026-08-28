@@ -58,6 +58,9 @@ class Field:
     # keeps a password containing "@" or "/" from silently rewriting the URL
     # into a different host. Default: encode everything.
     safe: str = ""
+    # "text" or "toggle". A toggle is not interpolated into the template: the
+    # only one is `tls`, and what it selects is the scheme.
+    type: str = "text"
 
 
 @dataclass(frozen=True)
@@ -68,6 +71,11 @@ class Service:
     template: str
     fields: tuple[Field, ...]
     setup_url: str
+    # The https/TLS spelling of `scheme`, for the services an operator hosts
+    # themselves. Set it and the kind grows a "Use TLS" toggle, on by default,
+    # because the alternative is a Gotify token or a Rocket.Chat password
+    # crossing the network in the clear.
+    secure_scheme: str = ""
 
 
 # Shared shapes. Deliberately permissive: a rule that rejects something which
@@ -104,10 +112,21 @@ _PHONES_HINT = "One number in international form, or several separated by a comm
 # went wrong rather than a true but useless remark about character counts.
 _URLISH = r"[A-Za-z][A-Za-z0-9+.\-]*://"
 
+TLS_FIELD = Field(
+    "tls", "Use TLS", type="toggle", required=False, default="on",
+    help="Turn this off only if the server answers on plain http.")
+
+
+def _tls_on(values: dict) -> bool:
+    raw = values.get("tls", "on")
+    if isinstance(raw, bool):
+        return raw
+    return str(raw).strip().lower() not in ("", "0", "off", "false", "no")
+
 
 CATALOG: tuple[Service, ...] = (
     Service(
-        kind="ntfy", scheme="ntfy", label="ntfy",
+        kind="ntfy", scheme="ntfy", label="ntfy", secure_scheme="ntfys",
         template="ntfy://{host}/{topic}",
         setup_url="https://appriseit.com/services/ntfy/",
         fields=(
@@ -120,7 +139,7 @@ CATALOG: tuple[Service, ...] = (
         ),
     ),
     Service(
-        kind="gotify", scheme="gotify", label="Gotify",
+        kind="gotify", scheme="gotify", label="Gotify", secure_scheme="gotifys",
         template="gotify://{host}/{token}",
         setup_url="https://appriseit.com/services/gotify/",
         fields=(
@@ -133,16 +152,27 @@ CATALOG: tuple[Service, ...] = (
         ),
     ),
     Service(
-        kind="email", scheme="mailto", label="Email",
-        template="mailto://{user}:{password}@{host}/{to}",
+        kind="email", scheme="mailto", label="Email", secure_scheme="mailtos",
+        template="mailto://{user}:{password}@{host}/{to}?from={from_email}",
         setup_url="https://appriseit.com/services/email/",
         fields=(
             Field("host", "SMTP server", placeholder="smtp.example.com", safe=":",
-                  pattern=_HOST, hint=_HOST_HINT),
+                  pattern=_HOST, hint=_HOST_HINT,
+                  help="The mail server, not your domain. Gmail is smtp.gmail.com."),
             Field("user", "Username", placeholder="you@example.com",
-                  pattern=r"^\S+$", hint="No spaces."),
+                  pattern=r"^\S+$", hint="No spaces.",
+                  help="Whatever the server expects at sign-in. Most providers "
+                       "want the whole address; some want the part before the @."),
             Field("password", "Password", example="an app password, not your login", secret=True),
-            Field("to", "Send to", placeholder="you@example.com", safe="/@",
+            # Without this Apprise invents a sender by gluing the username to
+            # the SMTP host, so a login of you@example.com on smtp.example.com
+            # sends as you@smtp.example.com: a mailbox that does not exist,
+            # which SPF and DMARC then reject.
+            Field("from_email", "From address", placeholder="you@example.com", safe="@",
+                  pattern=_EMAIL, hint=_EMAIL_HINT,
+                  help="What the recipient sees the mail come from. Usually the "
+                       "same address as the username."),
+            Field("to", "Send to", placeholder="ops@example.com", safe="/@",
                   pattern=_EMAILS, hint=_EMAILS_HINT,
                   help="Separate several addresses with a comma."),
         ),
@@ -195,18 +225,18 @@ CATALOG: tuple[Service, ...] = (
         ),
     ),
     Service(
-        kind="webhook", scheme="json", label="Webhook (JSON)",
+        kind="webhook", scheme="json", label="Webhook (JSON)", secure_scheme="jsons",
         template="json://{host}",
         setup_url="https://appriseit.com/services/json/",
         fields=(
             Field("host", "Address", safe="/:@", placeholder="example.com/hooks/proxploy",
                   pattern=_HOST_PATH,
                   hint="Host and path with no scheme, like example.com/hooks/proxploy.",
-                  help="Host and path, no https:// prefix. Use Secure for TLS."),
+                  help="Host and path only, with no https:// in front of it."),
         ),
     ),
     Service(
-        kind="matrix", scheme="matrix", label="Matrix",
+        kind="matrix", scheme="matrix", label="Matrix", secure_scheme="matrixs",
         template="matrix://{user}:{password}@{host}/{room}",
         setup_url="https://appriseit.com/services/matrix/",
         fields=(
@@ -220,7 +250,7 @@ CATALOG: tuple[Service, ...] = (
         ),
     ),
     Service(
-        kind="mattermost", scheme="mmost", label="Mattermost",
+        kind="mattermost", scheme="mmost", label="Mattermost", secure_scheme="mmosts",
         template="mmost://{host}/{token}",
         setup_url="https://appriseit.com/services/mattermost/",
         fields=(
@@ -232,7 +262,7 @@ CATALOG: tuple[Service, ...] = (
         ),
     ),
     Service(
-        kind="rocketchat", scheme="rocket", label="Rocket.Chat",
+        kind="rocketchat", scheme="rocket", label="Rocket.Chat", secure_scheme="rockets",
         template="rocket://{user}:{password}@{host}/{channel}",
         setup_url="https://appriseit.com/services/rocketchat/",
         fields=(
@@ -270,7 +300,7 @@ CATALOG: tuple[Service, ...] = (
         ),
     ),
     Service(
-        kind="signal", scheme="signal", label="Signal",
+        kind="signal", scheme="signal", label="Signal", secure_scheme="signals",
         template="signal://{host}/{from_phone}/{to}",
         setup_url="https://appriseit.com/services/signal/",
         fields=(
@@ -348,7 +378,7 @@ CATALOG: tuple[Service, ...] = (
         ),
     ),
     Service(
-        kind="apprise", scheme="apprise", label="Apprise API",
+        kind="apprise", scheme="apprise", label="Apprise API", secure_scheme="apprises",
         template="apprise://{host}/{token}",
         setup_url="https://appriseit.com/services/apprise_api/",
         fields=(
@@ -411,13 +441,19 @@ def public_catalog() -> list[dict]:
                      "secret": f.secret, "placeholder": f.placeholder,
                      "default": f.default, "help": f.help,
                      "example": f.example or f.placeholder,
+                     "type": f.type,
                      # The client gets the same rule string the server gates
                      # on, so the two can never drift into disagreeing about
                      # what is acceptable.
                      "pattern": f.pattern, "hint": f.hint}
-                    for f in s.fields]}
+                    for f in fields_for(s)]}
         for s in CATALOG
     ]
+
+
+def fields_for(service: Service) -> tuple[Field, ...]:
+    """A kind's questions, plus the TLS toggle when it has a scheme for it."""
+    return service.fields + ((TLS_FIELD,) if service.secure_scheme else ())
 
 
 def secret_keys(kind: str) -> set[str]:
@@ -441,6 +477,11 @@ def build_url(kind: str, values: dict) -> str:
     if service is None:
         raise ValueError(f"unknown channel kind: {kind!r}")
 
+    template = service.template
+    if service.secure_scheme and _tls_on(values):
+        template = template.replace(f"{service.scheme}://",
+                                    f"{service.secure_scheme}://", 1)
+
     parts = {}
     for f in service.fields:
         raw = str(values.get(f.key) or "").strip() or f.default
@@ -461,4 +502,4 @@ def build_url(kind: str, values: dict) -> str:
 
     # Optional fields are all trailing segments, so an empty one leaves a
     # dangling separator rather than a hole in the middle.
-    return service.template.format(**parts).rstrip("/")
+    return template.format(**parts).rstrip("/")
