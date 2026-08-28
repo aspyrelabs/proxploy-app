@@ -15,6 +15,7 @@ const HEADS = ['App', 'Host', 'Status', 'CPU', 'RAM', 'Storage', 'Network', '']
 
 const th = 'px-4 py-2 text-left text-[10.5px] font-normal uppercase text-text-3'
 const td = 'px-4 py-3 align-middle'
+const tdHost = 'pl-4 pr-1 py-3 align-middle font-mono text-[11px] text-text-3 max-w-[120px]'
 
 /**
  * The Apps section's list view: every app as a row, carrying the same
@@ -121,8 +122,9 @@ function AppTableRow({ app, open, onToggle }: {
           {app.update_available && <UpdateDot />}
         </div>
       </td>
-      <td className={`${td} font-mono text-[11px] text-text-3`}>
-        {app.host_name} · CT {app.ctid}
+      <td className={tdHost}>
+        <div className="truncate" title={app.host_name ?? undefined}>{app.host_name}</div>
+        <div>· CT {app.ctid}</div>
       </td>
       <td className={td}><StatusPill status={app.status} /></td>
       <td className={td}><Meter pct={app.cpu_pct} gradient={CPU_GRADIENT} /></td>

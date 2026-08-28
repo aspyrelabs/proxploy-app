@@ -16,6 +16,7 @@ const HEADS = ['Name', 'Host', 'Status', 'CPU', 'RAM', 'Storage', 'Network', '']
 
 const th = 'px-4 py-2 text-left text-[10.5px] font-normal uppercase text-text-3'
 const td = 'px-4 py-3 align-middle'
+const tdHost = 'pl-4 pr-1 py-3 align-middle font-mono text-[11px] text-text-3 max-w-[120px]'
 
 /**
  * The Virtual Machines list: every VM as a row that expands in place.
@@ -124,8 +125,9 @@ function VmTableRow({ vm, open, onToggle }: {
           </button>
         </div>
       </td>
-      <td className={`${td} font-mono text-[11px] text-text-3`}>
-        {vm.host_name} · VM {vm.vmid}
+      <td className={tdHost}>
+        <div className="truncate" title={vm.host_name ?? undefined}>{vm.host_name}</div>
+        <div>· VM {vm.vmid}</div>
       </td>
       <td className={td}><StatusPill status={vm.status} /></td>
       <td className={td}><Meter pct={vm.cpu_pct} gradient={CPU_GRADIENT} /></td>
