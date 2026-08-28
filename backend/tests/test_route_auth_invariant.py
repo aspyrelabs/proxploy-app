@@ -47,6 +47,15 @@ PUBLIC = {
                                             # dependency exists to 401 an anonymous caller;
                                             # a bad/missing pending+code pair 422s or 401s
                                             # from inside the handler, never leaks a 403.
+    ("POST", "/api/v1/auth/recover"),      # spending a recovery code to set a new
+                                            # password. Public and pre-session on purpose
+                                            # (api/auth.py::recover_with_code): whoever
+                                            # needs it cannot sign in, and the recovery
+                                            # code IS the proof. Same shape as /auth/totp
+                                            # above: json={} 422s on the missing body
+                                            # before anything role-shaped runs, and every
+                                            # real failure is one flat 401 so the answer
+                                            # never says which addresses exist.
 }
 
 

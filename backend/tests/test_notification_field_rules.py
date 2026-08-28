@@ -189,15 +189,29 @@ def test_several_phone_numbers_do_the_same():
     assert [t[1] for t in ap[0].targets] == ["+15559876543", "+15550001111"]
 
 
-def test_every_field_carries_an_example():
+def test_every_field_you_type_into_carries_an_example():
     """A password box shows no placeholder, so a secret field has nothing to
     borrow and needs one spelled out. Those are exactly the fields where
-    "what am I even meant to paste here" bites hardest."""
+    "what am I even meant to paste here" bites hardest.
+
+    Toggles are exempt, and it is not a loophole: an example is a realistic
+    VALUE to type, and there is nothing to type into a switch. The (i) beside
+    "Use TLS" reading "on" would tell an operator strictly less than the
+    switch already does. Every toggle in the catalog is the one shared
+    TLS_FIELD (notification_catalog.py), which carries help text instead.
+    """
     from proxploy.services.notification_catalog import public_catalog
 
+    typed = 0
     for svc in public_catalog():
         for f in svc["fields"]:
+            if f.get("type") == "toggle":
+                assert f["help"], f"{svc['kind']}.{f['key']} is a toggle with no help"
+                continue
+            typed += 1
             assert f["example"], f"{svc['kind']}.{f['key']} has no example"
+    # A rule that exempts its way down to nothing has stopped being a rule.
+    assert typed > 20, f"only {typed} typed fields checked; the walk is broken"
 
 
 def test_no_example_is_a_real_credential_shape_we_would_regret():

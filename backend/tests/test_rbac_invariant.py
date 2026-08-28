@@ -36,6 +36,11 @@ UNGOVERNED = {
     # point of the route. Ownership/single-use/attempt-cap is enforced by the
     # pending-2FA store itself (api/auth.py), not by casbin.
     ("POST", "/api/v1/auth/totp"),
+    # Password recovery by spending a 2FA recovery code: public and
+    # pre-session for the same reason as /auth/login above, so there is no
+    # user for authorize() to ask casbin about. The recovery code is the
+    # whole authorisation, checked inside the handler.
+    ("POST", "/api/v1/auth/recover"),
     # Self-service session list/revoke (Task 9): "my own sessions" has no
     # (resource, action) pair in services/authz.py's PERMISSIONS matrix and
     # doesn't need one: every role may always manage its own login state.
@@ -96,6 +101,9 @@ VIEWER_SELF = {
                                              # like /auth/login above, json={} 422s on the
                                              # missing body before anything role-shaped
                                              # runs; there is no authorize() here to deny
+    ("POST", "/api/v1/auth/recover"),        # UNGOVERNED (pre-session password recovery);
+                                             # same as the two above, json={} 422s on the
+                                             # missing body and no authorize() exists here
     ("DELETE", "/api/v1/auth/sessions/{sid}"),  # own sessions; another user's id 404s
     # Own trusted devices, same shape: the query filters on user_id, so another
     # user's id 404s rather than 403s. Forgetting a device only ever makes a

@@ -52,7 +52,14 @@ def _add_webhook_channel(client, csrf, server, name="Ops webhook"):
     host, port = server.server_address
     r = client.post("/api/v1/notifications/channels",
                     json={"name": name, "kind": "webhook",
-                          "fields": {"host": f"{host}:{port}/hook"},
+                          # tls off because `inbox` is a plain http.server, so
+                          # the catalog's `jsons://` default (TLS_FIELD, on by
+                          # default and right for a real endpoint) would send
+                          # TLS at a socket that speaks none and every delivery
+                          # here would fail. This is the toggle the picker
+                          # shows an operator whose webhook is plain http, set
+                          # the way that operator would set it.
+                          "fields": {"host": f"{host}:{port}/hook", "tls": "off"},
                           "events": []},
                     headers=csrf(client))
     assert r.status_code == 201, r.text
@@ -371,9 +378,19 @@ def test_every_registry_key_can_be_produced_by_something(inbox):
             pass
 
     producible = {type_for_job(k, s) for k in HANDLERS for s in TERMINAL}
-    # The three with no job behind them, emitted by services/alerts.py and
-    # services/audit.py.
-    producible |= {"alert.fired", "alert.resolved", "audit.error", "update.available"}
+    # The ones with no job behind them, each named with what emits it so this
+    # set cannot quietly become a list of keys nobody produces, which is the
+    # exact failure this test exists to catch.
+    producible |= {
+        "alert.fired", "alert.resolved",   # services/alerts.py
+        "audit.error",                     # services/audit.py
+        "update.available",                # services/updater.py
+        # Emitted by the catalog reclassify job when an entry's installable
+        # verdict actually moves (services/catalog.py::_transitions). Not
+        # type_for_job-derived: they are not a job's own terminal state, they
+        # are something that job noticed.
+        "catalog.apps_available", "catalog.apps_unavailable",
+    }
     assert set(BY_KEY) == producible
 
 
@@ -401,7 +418,11 @@ def test_every_notification_type_reaches_a_channel(tmp_path, csrf_header,
             assert notifier.notify(app, t.key, f"Proxploy: {t.label}",
                                    "- **Job:** #1") == 1, t.key
 
-    assert len(_Inbox.received) == len(TYPES) == 20
+    # Derived, not a literal. The registry's SIZE is pinned deliberately in
+    # one place (test_notification_types.py); a second copy of the number here
+    # only ever rots, and it rotted: two catalog types landed and this line is
+    # what said so, about a sweep that was working perfectly.
+    assert len(_Inbox.received) == len(TYPES)
     titles = [m["title"] for m in _Inbox.received]
     for t in TYPES:
         assert f"Proxploy: {t.label}" in titles
@@ -422,4 +443,5 @@ def test_the_two_that_ship_off_stay_off_until_asked(tmp_path, csrf_header,
             reached = notifier.notify(app, t.key, "t", "b")
             assert reached == (0 if t.key.startswith("housekeeping.") else 1), t.key
 
-    assert len(_Inbox.received) == 18
+    assert len(_Inbox.received) == len(
+        [t for t in TYPES if not t.key.startswith("housekeeping.")])
