@@ -218,6 +218,8 @@ GATE_WINDOW = 8
 # on a value it does not recognise, and that is validation rather than
 # consent, so the window must show the answer being tested for yes.
 GATE_YES_RE = re.compile(r"\[[yY]|\byes\b", re.I)
+OPTIONAL_TEXT_RE = re.compile(
+    r"press enter to skip|leave (it )?blank|if you have one|\(optional\)", re.I)
 EXIT_RE = re.compile(r"\bexit\b")
 
 # A prompt inside a retry loop, which the read shim cannot safely answer.
@@ -315,6 +317,8 @@ def extract_prompts(install_script: str) -> list[dict]:
         else:
             m2 = DEFAULT_RE.search(text)
             default = m2.group(1) if m2 else None
+            if default is None and OPTIONAL_TEXT_RE.search(text):
+                default = ""
         window = "\n".join(lines[i + 1:i + 1 + GATE_WINDOW])
         # `yesno and`: an exit near the read means "declining aborts" only for a
         # yes/no question. For any other shape it is validation, not consent:
