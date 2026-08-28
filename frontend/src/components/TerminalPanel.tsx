@@ -10,7 +10,13 @@ export type TermLine = { stream: string; message: string }
 // console (terminal/Terminal.tsx) is the one that follows that setting.
 const STREAM_CLASS: Record<string, string> = {
   stdout: 'text-text-2',
-  stderr: 'text-red',
+  // NOT red. stderr is where community-scripts writes its hints, its spinners
+  // and its own success marks: a dashy update that finished correctly painted
+  // 200 lines of `find: no such file` red, because the script removes
+  // node_modules while find is still walking it, and the operator reasonably
+  // read that as a failed update. Dimmer, because it is secondary output, not
+  // because it is bad news.
+  stderr: 'text-text-3',
   progress: 'text-blue',
   status: 'text-amber',
 }
@@ -38,6 +44,18 @@ function stripAnsi(s: string): string {
  *  log dialog, which sizes itself to the transcript under the 80vh cap);
  *  min-h-0 is what lets flexbox shrink it, since a flex child's default
  *  min-height refuses to go below its content. */
+// The verdict line is the one that earns a colour, and it earns it from the
+// outcome rather than from the channel it arrived on.
+const FAILED = /^(failed|canceled|interrupted)\b/i
+
+function classFor(line: TermLine): string {
+  if (line.stream === 'status') {
+    if (FAILED.test(line.message)) return 'text-red'
+    return /^succeeded\b/i.test(line.message) ? 'text-green' : 'text-amber'
+  }
+  return STREAM_CLASS[line.stream] ?? 'text-text-2'
+}
+
 export function TerminalPanel({ lines, height = 260 }:
   { lines: TermLine[]; height?: number | 'fill' }) {
   const fill = height === 'fill'
@@ -63,7 +81,7 @@ export function TerminalPanel({ lines, height = 260 }:
         <div className="text-text-3">No output yet.</div>
       ) : (
         lines.map((l, i) => (
-          <div key={i} className={STREAM_CLASS[l.stream] ?? 'text-text-2'}>
+          <div key={i} className={classFor(l)}>
             {stripAnsi(l.message)}
           </div>
         ))
