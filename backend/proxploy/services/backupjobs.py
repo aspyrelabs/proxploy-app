@@ -696,6 +696,25 @@ def storage_for_content(client, node: str, want: str) -> str | None:
     return best
 
 
+_DISK_KEY = re.compile(r"^(rootfs|scsi\d+|virtio\d+|sata\d+|ide\d+)$")
+
+
+def guest_storage(client, kind: str, node: str, vmid: int) -> str | None:
+    try:
+        config = client.guest_config(kind, node, vmid)
+    except ProxmoxError:
+        return None
+    for key in sorted(config):
+        value = config[key]
+        if not _DISK_KEY.match(str(key)) or not isinstance(value, str):
+            continue
+        head = value.split(",")[0]
+        if "media=cdrom" in value or ":" not in head:
+            continue
+        return head.split(":")[0]
+    return None
+
+
 def adopt_restored(app, backup_id: int, new_vmid: int) -> str | None:
     """Blocking: make a restored container Proxploy's own, and say what it is.
 
@@ -759,6 +778,12 @@ async def restore_backup(ctx: JobContext, params: dict) -> dict:
         vmid = await asyncio.to_thread(client.cluster_nextid)
     call = ({"ostemplate": info["volid"], "restore": 1} if kind == "lxc"
             else {"archive": info["volid"]})
+    # The restore runs on LIFECYCLE, not the backup client that read the
+    # archive: it writes a guest config, so PVE checks VM.Allocate for a fresh
+    # vmid and SDN.Use for the NIC it carries, neither of which the Backup
+    # role holds.
+    lifecycle_client, _, _ = await asyncio.to_thread(
+        _host_target, app, int(info["host_id"]), "lifecycle")
     if params.get("storage"):
         call["storage"] = params["storage"]
     else:
@@ -767,23 +792,25 @@ async def restore_backup(ctx: JobContext, params: dict) -> dict:
         # on "storage 'local' does not support container directories". The UI
         # sends no storage, so that was every restore-as-new.
         want = "rootdir" if kind == "lxc" else "images"
-        picked = await asyncio.to_thread(storage_for_content, client, node, want)
+        picked = None
+        if in_place:
+            picked = await asyncio.to_thread(
+                guest_storage, lifecycle_client, kind, node, vmid)
+            if picked is not None:
+                ctx.log(f"no storage given, restoring onto {picked!r}, "
+                        f"where {kind} {vmid} already lives")
         if picked is None:
-            raise JobFailed(
-                f"no active storage on {node} accepts {want} content; "
-                f"choose a target storage for this restore")
-        ctx.log(f"no storage given, restoring onto {picked!r} (accepts {want})")
+            picked = await asyncio.to_thread(storage_for_content, client, node, want)
+            if picked is None:
+                raise JobFailed(
+                    f"no active storage on {node} accepts {want} content; "
+                    f"choose a target storage for this restore")
+            ctx.log(f"no storage given, restoring onto {picked!r} (accepts {want})")
         call["storage"] = picked
     if in_place:
         call["force"] = 1  # overwrite the existing guest; PVE requires it stopped
     ctx.log(f"restoring {info['volid']} to {kind} {vmid} on {node} "
             f"({'in place' if in_place else 'as new'})")
-    # The restore runs on LIFECYCLE, not the backup client that read the
-    # archive: it writes a guest config, so PVE checks VM.Allocate for a fresh
-    # vmid and SDN.Use for the NIC it carries, neither of which the Backup
-    # role holds.
-    lifecycle_client, _, _ = await asyncio.to_thread(
-        _host_target, app, int(info["host_id"]), "lifecycle")
     upid = await asyncio.to_thread(lifecycle_client.restore_guest, kind, node, vmid, call)
     status = await await_task(ctx, lifecycle_client, node, upid,
                               timeout_s=app.state.settings.pve_task_timeout_s)

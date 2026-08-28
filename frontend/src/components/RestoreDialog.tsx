@@ -107,7 +107,10 @@ export function RestoreDialog({ backup, onClose }: {
               <select value={storage} onChange={(e) => setStorage(e.target.value)}
                       className="rounded-ctl border border-line bg-panel px-2 py-1
                                  font-mono text-[11.5px] text-text">
-                <option value="">the roomiest pool that fits</option>
+                <option value="">
+                  {mode === 'in_place' ? 'the pool it lives on now'
+                                       : 'the roomiest pool that fits'}
+                </option>
                 {pools.map((s) => <option key={s} value={s}>{s}</option>)}
               </select>
             </label>
