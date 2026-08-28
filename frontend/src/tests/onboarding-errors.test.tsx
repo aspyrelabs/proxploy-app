@@ -52,7 +52,7 @@ const wrap = (onCreated = () => {}) => {
 const fillAndSubmit = async () => {
   fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'a@test.local' } })
   fireEvent.change(screen.getByLabelText('Display name'), { target: { value: 'A' } })
-  fireEvent.change(screen.getByLabelText('Password (12+ chars)'),
+  fireEvent.change(screen.getByLabelText('Password'),
                    { target: { value: 'Passw0rd123!' } })
   fireEvent.click(screen.getByRole('button', { name: 'Review' }))
   fireEvent.click(await screen.findByRole('button', { name: 'Create account' }))

@@ -1,3 +1,5 @@
+import { PasswordStrength } from './PasswordStrength'
+import { MIN_LENGTH, refusal } from '../lib/password-strength'
 import { useState } from 'react'
 import { api, apiErrorDetail } from '../api/client'
 import { inputCls } from './LoginForm'
@@ -5,10 +7,6 @@ import { Button } from './ui/button'
 
 type Existing = { id: number; email: string; display_name: string }
 
-// Mirrors UserIn.password / PasswordResetIn in backend/proxploy/api/auth.py.
-// The server is still the authority; this is so the form stops claiming a
-// minimum it does not check, and stops sending requests it knows will 422.
-const MIN_PASSWORD = 12
 
 /** Step 1 of onboarding, in both of its modes.
  *
@@ -31,10 +29,8 @@ export function AdminAccountStep({ existing, onCreated }: {
   // gates, because jsdom and any programmatic submit skip native validation.
   function review(e: React.FormEvent) {
     e.preventDefault(); setError('')
-    if (admin.password.length < MIN_PASSWORD) {
-      setError(`Password must be at least ${MIN_PASSWORD} characters.`)
-      return
-    }
+    const why = refusal(admin.password)
+    if (why) { setError(why); return }
     setReviewing(true)
   }
 
@@ -92,12 +88,15 @@ export function AdminAccountStep({ existing, onCreated }: {
       <Heading title="Create your admin account"
         sub="This is the account you will sign in with. You get to check it before anything is created." />
       {([['email', 'Email', 'email'], ['display_name', 'Display name', 'text'],
-         ['password', 'Password (12+ chars)', 'password']] as const).map(([k, label, type]) => (
+         ['password', 'Password', 'password']] as const).map(([k, label, type]) => (
         <div key={k}>
           <label htmlFor={k} className="mb-1 block text-[11px] uppercase tracking-wide text-text-3">{label}</label>
           <input id={k} type={type} required={k !== 'display_name'} className={inputCls}
-            minLength={k === 'password' ? MIN_PASSWORD : undefined}
+            minLength={k === 'password' ? MIN_LENGTH : undefined}
             value={admin[k]} onChange={e => setAdmin(a => ({ ...a, [k]: e.target.value }))} />
+          {k === 'password' && (
+            <PasswordStrength value={admin.password} email={admin.email} />
+          )}
         </div>
       ))}
       {error && <p className="text-[12.5px] text-red">{error}</p>}
@@ -183,6 +182,7 @@ function EditPanel({ existing }: { existing: Existing }) {
         </label>
         <input id="edit-pw" type="password" className={inputCls} value={pw}
           onChange={e => setPw(e.target.value)} />
+        <PasswordStrength value={pw} email={existing?.email} />
       </div>
 
       {note && <p className="text-[12.5px] text-green">{note}</p>}
@@ -190,7 +190,7 @@ function EditPanel({ existing }: { existing: Existing }) {
 
       <div className="flex gap-2">
         <Button variant="ghost" onClick={saveName}>Save display name</Button>
-        <Button onClick={savePassword} disabled={pw.length < MIN_PASSWORD}>Set new password</Button>
+        <Button onClick={savePassword} disabled={refusal(pw) !== null}>Set new password</Button>
       </div>
     </div>
   )

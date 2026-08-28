@@ -50,7 +50,7 @@ def csrf_header():
 
 @pytest.fixture
 def bootstrap_admin(csrf_header):
-    def _make(client, email="admin@example.com", password="correct-horse-battery"):
+    def _make(client, email="admin@example.com", password="Correct-Horse-Battery-9"):
         client.post("/api/v1/users", json={"email": email, "password": password,
                                            "display_name": "Admin"},
                     headers=csrf_header(client))

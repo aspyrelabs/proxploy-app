@@ -126,11 +126,11 @@ def test_probe_is_auth_and_rbac_gated_before_it_touches_the_network(pve_client,
         assert r.status_code == 401, r.text
 
     c.post("/api/v1/users", json={"email": "viewer@example.com",
-                                  "password": "correct-horse-battery",
+                                  "password": "Correct-Horse-Battery-9",
                                   "display_name": "V", "role": "viewer"},
            headers=csrf_header(c))
     c.post("/api/v1/auth/login", json={"email": "viewer@example.com",
-                                       "password": "correct-horse-battery"},
+                                       "password": "Correct-Horse-Battery-9"},
            headers=csrf_header(c))
     r = c.post("/api/v1/hosts/probe", json=HOST | {"name": None},
                headers=csrf_header(c))
@@ -291,11 +291,11 @@ def test_patch_host_requires_admin_role(pve_client, csrf_header):
     c, _ = pve_client
     hid = c.post("/api/v1/hosts", json=HOST, headers=csrf_header(c)).json()["id"]
     c.post("/api/v1/users", json={"email": "viewer2@example.com",
-                                  "password": "correct-horse-battery",
+                                  "password": "Correct-Horse-Battery-9",
                                   "display_name": "V2", "role": "viewer"},
            headers=csrf_header(c))
     c.post("/api/v1/auth/login", json={"email": "viewer2@example.com",
-                                       "password": "correct-horse-battery"},
+                                       "password": "Correct-Horse-Battery-9"},
            headers=csrf_header(c))
     r = c.patch(f"/api/v1/hosts/{hid}", json={"node_shell_enabled": True},
                headers=csrf_header(c))

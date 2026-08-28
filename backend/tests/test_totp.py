@@ -236,7 +236,7 @@ def test_disable_requires_password_then_succeeds(tmp_path, csrf_header, bootstra
         assert c.get("/api/v1/auth/me").json()["totp_enabled"] is True
 
         good = c.request("DELETE", "/api/v1/auth/totp",
-                         json={"password": "correct-horse-battery"}, headers=h)
+                         json={"password": "Correct-Horse-Battery-9"}, headers=h)
         assert good.status_code == 200 and good.json() == {"ok": True}
         assert c.get("/api/v1/auth/me").json()["totp_enabled"] is False
 
@@ -260,7 +260,7 @@ def test_regenerate_requires_password_then_returns_ten_fresh_codes(tmp_path, csr
         assert bad.status_code == 403
 
         good = c.post("/api/v1/auth/totp/recovery-codes/regenerate",
-                      json={"password": "correct-horse-battery"}, headers=h)
+                      json={"password": "Correct-Horse-Battery-9"}, headers=h)
         assert good.status_code == 200
         new_codes = good.json()["recovery_codes"]
         assert len(new_codes) == 10 and len(set(new_codes)) == 10
@@ -282,7 +282,7 @@ def test_regenerate_before_confirm_is_409(tmp_path, csrf_header, bootstrap_admin
         c.post("/api/v1/auth/totp/enroll", headers=h)  # pending, never confirmed
 
         r = c.post("/api/v1/auth/totp/recovery-codes/regenerate",
-                   json={"password": "correct-horse-battery"}, headers=h)
+                   json={"password": "Correct-Horse-Battery-9"}, headers=h)
         assert r.status_code == 409
 
 

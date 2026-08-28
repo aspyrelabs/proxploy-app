@@ -60,6 +60,11 @@ class User(TimestampMixin, Base):
     oidc_sub: Mapped[str | None] = mapped_column(Text)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime)
+    # Reset to 0 on any successful login. `locked_until` in the future is the
+    # only thing that refuses one, so clearing it is what unlocks an account.
+    failed_login_count: Mapped[int] = mapped_column(Integer, default=0,
+                                                    server_default="0", nullable=False)
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime)
     __table_args__ = (Index("ux_users_oidc", "oidc_issuer", "oidc_sub", unique=True),)
 
 

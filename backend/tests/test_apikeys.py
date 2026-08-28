@@ -10,7 +10,7 @@ from proxploy.models import ApiKey, App, AuditEvent, User
 from tests.support import make_app, seed_host_row
 
 
-def _mk_user(client, csrf_header, email, role, password="correct-horse-battery"):
+def _mk_user(client, csrf_header, email, role, password="Correct-Horse-Battery-9"):
     h = csrf_header(client)
     r = client.post("/api/v1/users", json={"email": email, "password": password,
                                            "role": role}, headers=h)
@@ -18,7 +18,7 @@ def _mk_user(client, csrf_header, email, role, password="correct-horse-battery")
     return r.json()
 
 
-def _login(client, csrf_header, email, password="correct-horse-battery"):
+def _login(client, csrf_header, email, password="Correct-Horse-Battery-9"):
     r = client.post("/api/v1/auth/login", json={"email": email,
                     "password": password}, headers=csrf_header(client))
     assert r.status_code == 200, r.text

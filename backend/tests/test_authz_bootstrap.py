@@ -36,7 +36,7 @@ def test_the_first_run_bootstrap_owner_is_not_denied(client, csrf_header):
     TeamMember; that row is what the enforcer runs on."""
     r = client.post("/api/v1/users",
                     json={"email": "first@x.io", "display_name": "First",
-                          "password": "correct-horse-battery"},
+                          "password": "Correct-Horse-Battery-9"},
                     headers=csrf_header(client))
     assert r.status_code == 201, r.text
 

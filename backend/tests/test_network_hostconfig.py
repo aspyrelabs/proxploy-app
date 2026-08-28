@@ -237,11 +237,11 @@ def test_operator_role_is_refused_host_config_is_admin(tmp_path, csrf_header,
         bootstrap_admin(c)
         host_id = _seed(app)
         c.post("/api/v1/users", json={"email": "viewer@example.com",
-                                      "password": "correct-horse-battery",
+                                      "password": "Correct-Horse-Battery-9",
                                       "display_name": "Viewer"},
                headers=csrf_header(c))
         c.post("/api/v1/auth/login", json={"email": "viewer@example.com",
-                                           "password": "correct-horse-battery"},
+                                           "password": "Correct-Horse-Battery-9"},
                headers=csrf_header(c))
         r = c.post(f"/api/v1/network/{host_id}/pve1/apply", headers=csrf_header(c),
                    json={"confirm": "pve1"})

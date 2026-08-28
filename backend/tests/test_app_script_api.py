@@ -281,11 +281,11 @@ def test_revert_requires_admin(tmp_path, csrf_header, bootstrap_admin):
             db.commit()
             app_id = app_row.id
         c.post("/api/v1/users", json={"email": "op@example.com",
-                                      "password": "correct-horse-battery",
+                                      "password": "Correct-Horse-Battery-9",
                                       "display_name": "Op", "role": "operator"},
                headers=csrf_header(c))
         c.post("/api/v1/auth/login", json={"email": "op@example.com",
-                                           "password": "correct-horse-battery"},
+                                           "password": "Correct-Horse-Battery-9"},
                headers=csrf_header(c))
         r = c.post(f"/api/v1/apps/{app_id}/script/revert", headers=csrf_header(c))
         assert r.status_code == 403 and r.json()["detail"] == "Your role does not allow this."
@@ -322,12 +322,12 @@ def test_an_operator_may_read_the_script_but_not_write_it(client, csrf_header,
         app_id = _seed_app_with_script(db).id
 
     client.post("/api/v1/users", json={"email": "op@example.com",
-                                       "password": "correct-horse-battery",
+                                       "password": "Correct-Horse-Battery-9",
                                        "display_name": "Op", "role": "operator"},
                 headers=csrf_header(client))
     client.post("/api/v1/auth/logout", headers=csrf_header(client))
     client.post("/api/v1/auth/login", json={"email": "op@example.com",
-                                            "password": "correct-horse-battery"},
+                                            "password": "Correct-Horse-Battery-9"},
                 headers=csrf_header(client))
 
     assert client.get(f"/api/v1/apps/{app_id}/script").status_code == 200

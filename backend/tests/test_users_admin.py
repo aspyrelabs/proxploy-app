@@ -14,7 +14,7 @@ def _app(tmp_path):
     return app, TestClient(app)
 
 
-def _make_user(c, csrf, email, role="operator", password="correct-horse-battery"):
+def _make_user(c, csrf, email, role="operator", password="Correct-Horse-Battery-9"):
     r = c.post("/api/v1/users", json={"email": email, "password": password,
                                       "role": role}, headers=csrf(c))
     assert r.status_code == 201, r.text
@@ -37,7 +37,7 @@ def test_deactivating_a_user_revokes_their_live_sessions(tmp_path, csrf_header,
         with other:
             r = other.post("/api/v1/auth/login",
                            json={"email": "op@example.com",
-                                 "password": "correct-horse-battery"},
+                                 "password": "Correct-Horse-Battery-9"},
                            headers=csrf_header(other))
             assert r.status_code == 200, r.text
             assert other.get("/api/v1/auth/me").status_code == 200
@@ -70,7 +70,7 @@ def test_a_deactivated_user_cannot_log_back_in(tmp_path, csrf_header,
         with other:
             r = other.post("/api/v1/auth/login",
                            json={"email": "op@example.com",
-                                 "password": "correct-horse-battery"},
+                                 "password": "Correct-Horse-Battery-9"},
                            headers=csrf_header(other))
             assert r.status_code == 401, "a deactivated account must not authenticate"
 
@@ -126,7 +126,7 @@ def test_reactivating_restores_login(tmp_path, csrf_header, bootstrap_admin):
         with other:
             assert other.post("/api/v1/auth/login",
                               json={"email": "op@example.com",
-                                    "password": "correct-horse-battery"},
+                                    "password": "Correct-Horse-Battery-9"},
                               headers=csrf_header(other)).status_code == 200
 
 
@@ -154,12 +154,12 @@ def test_admin_password_reset_works_and_kills_old_sessions(tmp_path, csrf_header
         with victim:
             victim.post("/api/v1/auth/login",
                         json={"email": "op@example.com",
-                              "password": "correct-horse-battery"},
+                              "password": "Correct-Horse-Battery-9"},
                         headers=csrf_header(victim))
             assert victim.get("/api/v1/auth/me").status_code == 200
 
             r = c.post(f"/api/v1/users/{uid}/password",
-                       json={"password": "a-brand-new-passphrase"},
+                       json={"password": "A-Brand-New-Passphrase-9"},
                        headers=csrf_header(c))
             assert r.status_code == 200 and r.json()["sessions_revoked"] == 1
             assert victim.get("/api/v1/auth/me").status_code == 401
@@ -168,14 +168,14 @@ def test_admin_password_reset_works_and_kills_old_sessions(tmp_path, csrf_header
         with fresh:
             assert fresh.post("/api/v1/auth/login",
                               json={"email": "op@example.com",
-                                    "password": "a-brand-new-passphrase"},
+                                    "password": "A-Brand-New-Passphrase-9"},
                               headers=csrf_header(fresh)).status_code == 200
             # The old one is dead.
             stale = TestClient(app)
             with stale:
                 assert stale.post("/api/v1/auth/login",
                                   json={"email": "op@example.com",
-                                        "password": "correct-horse-battery"},
+                                        "password": "Correct-Horse-Battery-9"},
                                   headers=csrf_header(stale)).status_code == 401
 
 
@@ -200,7 +200,7 @@ def test_password_reset_does_not_silently_drop_the_second_factor(
         with app.state.sessionmaker() as db:
             db.get(User, uid).totp_enabled = True
             db.commit()
-        c.post(f"/api/v1/users/{uid}/password", json={"password": "another-long-one"},
+        c.post(f"/api/v1/users/{uid}/password", json={"password": "Another-Long-One-9"},
                headers=csrf_header(c))
         with app.state.sessionmaker() as db:
             assert db.get(User, uid).totp_enabled is True
@@ -281,7 +281,7 @@ def test_deleting_the_last_active_owner_is_refused_even_with_an_inactive_one(
 
         c.post("/api/v1/auth/logout", headers=csrf_header(c))
         c.post("/api/v1/auth/login",
-               json={"email": "admin@corp.io", "password": "correct-horse-battery"},
+               json={"email": "admin@corp.io", "password": "Correct-Horse-Battery-9"},
                headers=csrf_header(c))
 
         r = c.delete(f"/api/v1/users/{bootstrap_owner}", headers=csrf_header(c))

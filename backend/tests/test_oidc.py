@@ -398,18 +398,18 @@ def test_oidc_config_routes_require_admin(client, csrf_header):
     this checks the role floor specifically: a plain viewer must not manage
     OIDC config (doc 10 Task 11: authorize("settings", "manage"))."""
     client.post("/api/v1/users", json={"email": "owner@example.com",
-                                       "password": "correct-horse-battery"},
+                                       "password": "Correct-Horse-Battery-9"},
                headers=csrf_header(client))
     client.post("/api/v1/auth/login",
-               json={"email": "owner@example.com", "password": "correct-horse-battery"},
+               json={"email": "owner@example.com", "password": "Correct-Horse-Battery-9"},
                headers=csrf_header(client))
     r = client.post("/api/v1/users", json={"email": "viewer@example.com",
-                                           "password": "correct-horse-battery",
+                                           "password": "Correct-Horse-Battery-9",
                                            "role": "viewer"},
                     headers=csrf_header(client))
     assert r.status_code == 201
     client.post("/api/v1/auth/login",
-               json={"email": "viewer@example.com", "password": "correct-horse-battery"},
+               json={"email": "viewer@example.com", "password": "Correct-Horse-Battery-9"},
                headers=csrf_header(client))
     r = client.get("/api/v1/auth/oidc/config", headers=csrf_header(client))
     assert r.status_code == 403

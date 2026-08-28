@@ -49,7 +49,7 @@ from tests.test_firewall_hardware_pressure import (PX, QEMU_NODE, QEMU_VMID,
 
 pytestmark = pytest.mark.pve_integration
 
-PASSWORD = "correct-horse-battery"
+PASSWORD = "Correct-Horse-Battery-9"
 
 # The field set frontend/src/components/FirewallRuleForm.tsx puts in a body, so
 # "the bodies the real UI sends" is not a guess. The form drops empty strings

@@ -60,11 +60,11 @@ def test_viewer_role_is_refused(tmp_path, csrf_header, bootstrap_admin):
         bootstrap_admin(c)
         _, app_id, vm_id = _seed(app)
         c.post("/api/v1/users", json={"email": "viewer@example.com",
-                                      "password": "correct-horse-battery",
+                                      "password": "Correct-Horse-Battery-9",
                                       "display_name": "Viewer"},
                headers=csrf_header(c))  # role omitted -> defaults to "viewer"
         c.post("/api/v1/auth/login", json={"email": "viewer@example.com",
-                                           "password": "correct-horse-battery"},
+                                           "password": "Correct-Horse-Battery-9"},
                headers=csrf_header(c))
         for url in (f"/api/v1/apps/{app_id}/start", f"/api/v1/vms/{vm_id}/start"):
             r = c.post(url, headers=csrf_header(c))

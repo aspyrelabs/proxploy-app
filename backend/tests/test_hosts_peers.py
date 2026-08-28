@@ -190,11 +190,11 @@ def test_discovery_needs_an_admin(peers_app, csrf_header):
         assert anon.get(f"/api/v1/hosts/{host_id}/peers").status_code == 401
 
     c.post("/api/v1/users", json={"email": "viewer@example.com",
-                                  "password": "correct-horse-battery",
+                                  "password": "Correct-Horse-Battery-9",
                                   "display_name": "V", "role": "viewer"},
            headers=csrf_header(c))
     c.post("/api/v1/auth/login", json={"email": "viewer@example.com",
-                                       "password": "correct-horse-battery"},
+                                       "password": "Correct-Horse-Battery-9"},
            headers=csrf_header(c))
     assert c.get(f"/api/v1/hosts/{host_id}/peers").status_code == 403
 
@@ -595,11 +595,11 @@ def test_enrolment_needs_an_owner(peers_app, csrf_header):
         assert _enrol(anon, csrf_header, host_id, ["pve2"]).status_code == 401
 
     c.post("/api/v1/users", json={"email": "admin2@example.com",
-                                  "password": "correct-horse-battery",
+                                  "password": "Correct-Horse-Battery-9",
                                   "display_name": "A", "role": "admin"},
            headers=csrf_header(c))
     c.post("/api/v1/auth/login", json={"email": "admin2@example.com",
-                                       "password": "correct-horse-battery"},
+                                       "password": "Correct-Horse-Battery-9"},
            headers=csrf_header(c))
     assert _enrol(c, csrf_header, host_id, ["pve2"]).status_code == 403
 

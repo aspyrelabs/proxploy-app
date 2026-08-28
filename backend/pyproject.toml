@@ -17,6 +17,10 @@ dependencies = [
   "requests>=2.32",
   "slowapi>=0.1.9",
   "email-validator>=2.0",
+  # Password guessability (services/password.py). MIT. The frontend runs the
+  # zxcvbn-ts port of the same estimator, so the strength meter and the server
+  # refuse the same passwords.
+  "zxcvbn>=4.5",
   "apprise>=1.9",
   "asyncssh>=2.14",
   "websockets>=14",

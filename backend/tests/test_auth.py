@@ -1,19 +1,19 @@
 def test_first_user_bootstrap_then_login_me_logout(client, csrf_header):
     # first user: unauthenticated create allowed, becomes owner
     r = client.post("/api/v1/users", json={
-        "email": "admin@example.com", "password": "correct-horse-battery",
+        "email": "admin@example.com", "password": "Correct-Horse-Battery-9",
         "display_name": "Admin"}, headers=csrf_header(client))
     assert r.status_code == 201
     assert r.json()["role"] == "owner"
 
     # second unauthenticated create is rejected
     r = client.post("/api/v1/users", json={
-        "email": "x@example.com", "password": "correct-horse-battery"},
+        "email": "x@example.com", "password": "Correct-Horse-Battery-9"},
         headers=csrf_header(client))
     assert r.status_code == 401
 
     r = client.post("/api/v1/auth/login", json={
-        "email": "admin@example.com", "password": "correct-horse-battery"},
+        "email": "admin@example.com", "password": "Correct-Horse-Battery-9"},
         headers=csrf_header(client))
     assert r.status_code == 200
 
@@ -30,7 +30,7 @@ def test_bad_password_rejected_and_audited(client, csrf_header):
     from proxploy.models import AuditEvent
 
     client.post("/api/v1/users", json={
-        "email": "a@example.com", "password": "correct-horse-battery"},
+        "email": "a@example.com", "password": "Correct-Horse-Battery-9"},
         headers=csrf_header(client))
     r = client.post("/api/v1/auth/login", json={
         "email": "a@example.com", "password": "wrong-wrong-wrong"},
@@ -56,7 +56,7 @@ def test_login_hashes_even_when_the_email_is_unknown(client, csrf_header, monkey
     from proxploy.services import authn
 
     client.post("/api/v1/users", json={
-        "email": "real@example.com", "password": "correct-horse-battery"},
+        "email": "real@example.com", "password": "Correct-Horse-Battery-9"},
         headers=csrf_header(client))
     db = client.app.state.sessionmaker()
     db.add(User(email="sso@example.com", password_hash=None))
@@ -83,17 +83,17 @@ def test_login_hashes_even_when_the_email_is_unknown(client, csrf_header, monkey
 
 def test_csrf_required_for_mutations(client):
     r = client.post("/api/v1/users", json={
-        "email": "b@example.com", "password": "correct-horse-battery"})
+        "email": "b@example.com", "password": "Correct-Horse-Battery-9"})
     assert r.status_code == 403  # no X-CSRF-Token header
 
 
 def test_login_rate_limited(client, csrf_header):
     for _ in range(10):
         client.post("/api/v1/auth/login", json={
-            "email": "nobody@example.com", "password": "nope-nope-nope"},
+            "email": "nobody@example.com", "password": "Nope-Nope-Nope-9"},
             headers=csrf_header(client))
     r = client.post("/api/v1/auth/login", json={
-        "email": "nobody@example.com", "password": "nope-nope-nope"},
+        "email": "nobody@example.com", "password": "Nope-Nope-Nope-9"},
         headers=csrf_header(client))
     assert r.status_code == 429
     assert r.headers["content-type"].startswith("application/problem+json")
@@ -103,6 +103,6 @@ def test_login_rate_limited(client, csrf_header):
 def test_admin_creates_user(client, csrf_header, bootstrap_admin):
     bootstrap_admin(client)
     r = client.post("/api/v1/users", json={
-        "email": "op@example.com", "password": "correct-horse-battery",
+        "email": "op@example.com", "password": "Correct-Horse-Battery-9",
         "role": "operator"}, headers=csrf_header(client))
     assert r.status_code == 201 and r.json()["role"] == "operator"

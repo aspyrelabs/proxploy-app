@@ -198,10 +198,10 @@ def test_sse_transcript_replays_backlog_then_closes_on_terminal_status(
         with httpx.Client(base_url=base, timeout=10) as c:
             c.get("/api/v1/meta/health")
             h = {"X-CSRF-Token": c.cookies["pp_csrf"]}
-            c.post("/api/v1/users", json={"email": "a@b.c", "password": "correct-horse-battery",
+            c.post("/api/v1/users", json={"email": "a@b.c", "password": "Correct-Horse-Battery-9",
                                           "display_name": "A"}, headers=h)
             c.post("/api/v1/auth/login", json={"email": "a@b.c",
-                                               "password": "correct-horse-battery"}, headers=h)
+                                               "password": "Correct-Horse-Battery-9"}, headers=h)
             job_id = _seed(app)
             body = c.get(f"/api/v1/jobs/{job_id}/events/stream").text
         assert "event: line" in body
@@ -265,10 +265,10 @@ def test_sse_dedups_a_line_written_in_the_subscribe_to_backlog_race_window(
         with httpx.Client(base_url=base, timeout=10) as c:
             c.get("/api/v1/meta/health")
             h = {"X-CSRF-Token": c.cookies["pp_csrf"]}
-            c.post("/api/v1/users", json={"email": "a@b.c", "password": "correct-horse-battery",
+            c.post("/api/v1/users", json={"email": "a@b.c", "password": "Correct-Horse-Battery-9",
                                           "display_name": "A"}, headers=h)
             c.post("/api/v1/auth/login", json={"email": "a@b.c",
-                                               "password": "correct-horse-battery"}, headers=h)
+                                               "password": "Correct-Horse-Battery-9"}, headers=h)
             with app.state.sessionmaker() as db:
                 job = Job(kind="app.start", status="running", target_type="app", target_id=1)
                 db.add(job)

@@ -182,12 +182,12 @@ def test_detach_is_owner_only_while_attach_is_admin(tmp_path, csrf_header,
     with c:
         bootstrap_admin(c)
         c.post("/api/v1/users",
-               json={"email": "admin2@example.com", "password": "correct-horse-battery",
+               json={"email": "admin2@example.com", "password": "Correct-Horse-Battery-9",
                      "display_name": "Admin Two", "role": "admin"},
                headers=csrf_header(c))
         c2 = TestClient(app)
         c2.post("/api/v1/auth/login",
-                json={"email": "admin2@example.com", "password": "correct-horse-battery"},
+                json={"email": "admin2@example.com", "password": "Correct-Horse-Battery-9"},
                 headers=csrf_header(c2))
         ok = c2.post("/api/v1/storage",
                      json={"host_id": hid, "storage": "dir-scratch", "type": "dir",

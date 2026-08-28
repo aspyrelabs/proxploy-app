@@ -9,6 +9,7 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 from sqlalchemy import text
 
+from proxploy.services.password import refuse as password_refusal
 from proxploy.api.deps import (ROLE_ORDER, authorize, default_team, get_current_user,
                                get_db, require_entitlement, user_role)
 from proxploy.models import (SessionRow, TeamMember, TrustedDevice, User,
@@ -112,10 +113,22 @@ def login(request: Request, body: LoginIn, response: Response, db=Depends(get_db
     # still telling anyone with a stopwatch which addresses exist.
     ok = authn.verify_password(user.password_hash if user and user.password_hash
                                else authn.DUMMY_HASH, body.password)
+    # Checked after the hash, never instead of it: answering a locked account
+    # faster than a wrong password would tell anyone with a stopwatch which
+    # addresses exist and which are worth waiting out.
+    if user is not None and _locked_for(user):
+        write_audit(db, actor_type="user", actor_id=user.id, action="auth.login",
+                    result="denied", params={"reason": "locked"}, ip=ip)
+        raise HTTPException(423, {"error": "account_locked",
+                                  "detail": _lock_detail(user),
+                                  "recoverable": bool(user.totp_enabled)})
     if not user or not user.password_hash or not ok or not user.is_active:
+        if user is not None:
+            _record_failure(db, user)
         write_audit(db, actor_type="user", actor_id=user.id if user else None,
                     action="auth.login", result="error", ip=ip)
         raise HTTPException(401, "invalid credentials")
+    _clear_failures(db, user)
     if user.totp_enabled:
         # This browser may already have proved the second factor. Checked
         # AFTER the password, never instead of it: the most a stolen trust
@@ -135,6 +148,85 @@ def login(request: Request, body: LoginIn, response: Response, db=Depends(get_db
                     action="auth.login.totp_pending", ip=ip)
         return {"totp_required": True, "pending": pending}
     return _issue_session(request, response, db, user)
+
+
+class RecoverIn(BaseModel):
+    email: EmailStr
+    recovery_code: str
+    password: str = Field(min_length=12)
+
+
+@router.post("/recover")
+@limiter.limit("5/minute")
+def recover_with_code(request: Request, body: RecoverIn, db=Depends(get_db)):
+    """Set a new password by spending a two-factor recovery code.
+
+    PUBLIC and UNGOVERNED, like /auth/login: whoever needs this cannot sign in.
+    The recovery code IS the proof, which is why this exists only for accounts
+    that enrolled two-factor. An account without it has no self-service route
+    back, on purpose: anything that could reset a password from the email
+    address alone would be a way in for whoever can read that inbox, and this
+    panel holds the keys to somebody's hypervisor.
+
+    One refusal for every failure, whatever the reason. A distinct answer for
+    "no such account", "that account has no two-factor" and "wrong code" would
+    let anyone map which addresses exist and which are worth attacking.
+    """
+    ip = request.client.host if request.client else None
+    user = db.query(User).filter_by(email=body.email).one_or_none()
+    kind = (totp.verify_login_kind(db, request.app.state.secretstore, user,
+                                   body.recovery_code)
+            if user is not None and user.is_active else None)
+    if kind != "recovery":
+        write_audit(db, actor_type="user", actor_id=user.id if user else None,
+                    action="auth.recover", result="error", ip=ip)
+        raise HTTPException(401, "that recovery code is not valid for this account")
+    if (why := password_refusal(body.password, email=body.email)):
+        raise HTTPException(422, why)
+    user.password_hash = authn.hash_password(body.password)
+    # A spent recovery code means the authenticator may be gone, so every
+    # device that had been trusted to skip the second factor loses it, and
+    # every existing session goes with the old password.
+    authn.revoke_trusted_devices(db, user.id)
+    _revoke_all_sessions(db, user.id)
+    user.failed_login_count = 0
+    user.locked_until = None
+    db.commit()
+    write_audit(db, actor_type="user", actor_id=user.id, action="auth.recover", ip=ip)
+    return {"ok": True}
+
+
+LOCKOUT_THRESHOLD = 5
+LOCKOUT_MINUTES = 10
+
+
+def _locked_for(user: User) -> int:
+    """Seconds still to wait, 0 when the account is not locked."""
+    if user.locked_until is None:
+        return 0
+    left = (user.locked_until - utcnow()).total_seconds()
+    return max(0, int(left))
+
+
+def _lock_detail(user: User) -> str:
+    minutes = max(1, round(_locked_for(user) / 60))
+    return (f"Too many wrong passwords. This account is locked for another "
+            f"{minutes} minute{'s' if minutes != 1 else ''}.")
+
+
+def _record_failure(db, user: User) -> None:
+    user.failed_login_count = (user.failed_login_count or 0) + 1
+    if user.failed_login_count >= LOCKOUT_THRESHOLD:
+        user.locked_until = utcnow() + timedelta(minutes=LOCKOUT_MINUTES)
+        user.failed_login_count = 0
+    db.commit()
+
+
+def _clear_failures(db, user: User) -> None:
+    if user.failed_login_count or user.locked_until:
+        user.failed_login_count = 0
+        user.locked_until = None
+        db.commit()
 
 
 @router.post("/totp")
@@ -400,6 +492,8 @@ _FIRST_RUN_LOCK_KEY = 0x50585031  # arbitrary int64, spells "PXP1"
 
 @users_router.post("", status_code=201)
 def create_user(request: Request, body: UserIn, db=Depends(get_db)):
+    if (why := password_refusal(body.password, email=body.email)):
+        raise HTTPException(422, why)
     with _first_run_lock:
         if db.get_bind().dialect.name == "postgresql":
             db.execute(text("SELECT pg_advisory_xact_lock(:key)"),
@@ -647,6 +741,8 @@ def reset_password(request: Request, user_id: int, body: PasswordResetIn,
     password is never required, which is precisely why this is
     ("user","manage") and audited.
     """
+    if (why := password_refusal(body.password)):
+        raise HTTPException(422, why)
     target = db.get(User, user_id)
     if target is None:
         raise HTTPException(404, "user not found")

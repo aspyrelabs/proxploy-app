@@ -394,11 +394,11 @@ def test_power_is_owner_gated(tmp_path, bootstrap_admin, csrf_header):
     app, c, fake, hid = _app(tmp_path)
     bootstrap_admin(c)
     c.post("/api/v1/users", json={"email": "admin2@example.com",
-                                  "password": "correct-horse-battery",
+                                  "password": "Correct-Horse-Battery-9",
                                   "display_name": "A2", "role": "admin"},
            headers=csrf_header(c))
     c.post("/api/v1/auth/login", json={"email": "admin2@example.com",
-                                       "password": "correct-horse-battery"},
+                                       "password": "Correct-Horse-Battery-9"},
            headers=csrf_header(c))
     r = c.post(f"/api/v1/hosts/{hid}/nodes/pve1/power",
                json={"command": "reboot", "confirm": "pve1"}, headers=csrf_header(c))

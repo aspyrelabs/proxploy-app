@@ -18,7 +18,7 @@ def test_concurrent_first_run_posts_mint_only_one_owner(client, csrf_header):
     def create(i):
         return client.post("/api/v1/users", json={
             "email": f"racer{i}@example.com",
-            "password": "correct-horse-battery",
+            "password": "Correct-Horse-Battery-9",
         }, headers=headers)
 
     with ThreadPoolExecutor(max_workers=n) as pool:

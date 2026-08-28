@@ -117,10 +117,10 @@ def test_a_viewer_cannot_apply_an_update(tmp_path, csrf_header, bootstrap_admin)
         bootstrap_admin(c)                       # owner, so it can mint a viewer
         h = csrf_header(c)
         c.post("/api/v1/users", json={"email": "v@x.io", "role": "viewer",
-               "password": "correct-horse-battery"}, headers=h)
+               "password": "Correct-Horse-Battery-9"}, headers=h)
         c.post("/api/v1/auth/logout", headers=h)
         c.post("/api/v1/auth/login", json={"email": "v@x.io",
-               "password": "correct-horse-battery"}, headers=h)
+               "password": "Correct-Horse-Battery-9"}, headers=h)
         r = c.post("/api/v1/meta/update", json={"version": "99.0.0"},
                    headers=csrf_header(c))
         assert r.status_code == 403

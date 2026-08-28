@@ -168,14 +168,14 @@ def test_a_viewer_session_cannot_mutate_anything(tmp_path, csrf_header):
     with TestClient(app) as c:
         h = csrf_header(c)
         c.post("/api/v1/users", json={"email": "o@x.io",
-               "password": "correct-horse-battery"}, headers=h)   # owner bootstrap
+               "password": "Correct-Horse-Battery-9"}, headers=h)   # owner bootstrap
         c.post("/api/v1/auth/login", json={"email": "o@x.io",
-               "password": "correct-horse-battery"}, headers=h)
+               "password": "Correct-Horse-Battery-9"}, headers=h)
         c.post("/api/v1/users", json={"email": "v@x.io", "role": "viewer",
-               "password": "correct-horse-battery"}, headers=h)
+               "password": "Correct-Horse-Battery-9"}, headers=h)
         c.post("/api/v1/auth/logout", headers=h)
         c.post("/api/v1/auth/login", json={"email": "v@x.io",
-               "password": "correct-horse-battery"}, headers=h)
+               "password": "Correct-Horse-Battery-9"}, headers=h)
 
         checked = 0
         for path, methods in c.app.openapi()["paths"].items():
@@ -197,7 +197,7 @@ def test_a_viewer_session_cannot_mutate_anything(tmp_path, csrf_header):
 
         # And the one VIEWER_SELF row that must still deny:
         r = c.post("/api/v1/users", json={"email": "x@x.io", "role": "viewer",
-                   "password": "correct-horse-battery"}, headers=h)
+                   "password": "Correct-Horse-Battery-9"}, headers=h)
         assert r.status_code == 403
 
 
@@ -215,14 +215,14 @@ def test_a_viewer_api_key_cannot_mutate_anything(tmp_path, csrf_header):
     with TestClient(app) as c:
         h = csrf_header(c)
         c.post("/api/v1/users", json={"email": "o2@x.io",
-               "password": "correct-horse-battery"}, headers=h)   # owner bootstrap
+               "password": "Correct-Horse-Battery-9"}, headers=h)   # owner bootstrap
         c.post("/api/v1/auth/login", json={"email": "o2@x.io",
-               "password": "correct-horse-battery"}, headers=h)
+               "password": "Correct-Horse-Battery-9"}, headers=h)
         c.post("/api/v1/users", json={"email": "v2@x.io", "role": "viewer",
-               "password": "correct-horse-battery"}, headers=h)
+               "password": "Correct-Horse-Battery-9"}, headers=h)
         c.post("/api/v1/auth/logout", headers=h)
         c.post("/api/v1/auth/login", json={"email": "v2@x.io",
-               "password": "correct-horse-battery"}, headers=h)
+               "password": "Correct-Horse-Battery-9"}, headers=h)
         key_resp = c.post("/api/v1/api-keys", json={"name": "viewer-key"}, headers=h)
         assert key_resp.status_code == 201, key_resp.text
         raw = key_resp.json()["key"]   # only place the raw ppk_... ever appears

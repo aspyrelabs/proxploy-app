@@ -274,11 +274,11 @@ def test_an_admin_who_is_not_an_owner_cannot_erase_the_trail(client, csrf_header
     bootstrap_admin(client)
     client.post("/api/v1/users",
                 json={"email": "admin2@example.com", "role": "admin",
-                      "password": "correct-horse-battery", "display_name": "Admin Two"},
+                      "password": "Correct-Horse-Battery-9", "display_name": "Admin Two"},
                 headers=csrf_header(client))
     c2 = TestClient(client.app)
     c2.post("/api/v1/auth/login",
-            json={"email": "admin2@example.com", "password": "correct-horse-battery"},
+            json={"email": "admin2@example.com", "password": "Correct-Horse-Battery-9"},
             headers=csrf_header(c2))
     assert c2.get("/api/v1/audit").status_code == 200, "reading is still allowed"
     r = c2.request("DELETE", "/api/v1/audit", json=CLEAR_BODY,

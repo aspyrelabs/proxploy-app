@@ -120,11 +120,11 @@ def test_the_live_stream_denies_an_authenticated_user_with_no_membership(tmp_pat
     with TestClient(app) as c:
         h = csrf_header(c)
         c.post("/api/v1/users", json={"email": "own@x.io",
-               "password": "correct-horse-battery"}, headers=h)   # bootstrap owner
+               "password": "Correct-Horse-Battery-9"}, headers=h)   # bootstrap owner
         c.post("/api/v1/auth/login", json={"email": "own@x.io",
-               "password": "correct-horse-battery"}, headers=h)
+               "password": "Correct-Horse-Battery-9"}, headers=h)
         c.post("/api/v1/users", json={"email": "orphan@x.io", "role": "viewer",
-               "password": "correct-horse-battery"}, headers=h)
+               "password": "Correct-Horse-Battery-9"}, headers=h)
         c.post("/api/v1/auth/logout", headers=h)
 
         # Strip the membership POST /users granted, leaving a real account
@@ -137,5 +137,5 @@ def test_the_live_stream_denies_an_authenticated_user_with_no_membership(tmp_pat
             sync_user(app.state.authz, db, orphan.id)
 
         c.post("/api/v1/auth/login", json={"email": "orphan@x.io",
-               "password": "correct-horse-battery"}, headers=h)
+               "password": "Correct-Horse-Battery-9"}, headers=h)
         assert c.get("/api/v1/events/stream").status_code == 403

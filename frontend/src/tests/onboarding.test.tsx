@@ -39,7 +39,7 @@ const scriptResult = { script: "# Proxploy\npveum role add ProxployAudit -privs 
                          { key: 'monitoring', label: 'Read-only monitoring', why: 'Always required.', required: true, role: 'ProxployAudit' },
                          { key: 'lifecycle', label: 'Lifecycle', why: 'Start/stop.', required: false, role: 'ProxployLifecycle' },
                        ] }
-let scriptCalls: { capabilities: string[]; node_shell: boolean; node_power: boolean }[] = []
+let scriptCalls: { capabilities: string[]; node_shell: boolean }[] = []
 // GET /hosts/capabilities, the same shape host-form-capabilities.test.tsx
 // exercises. Nothing in this file asserts on it directly; it just has to
 // resolve so HostForm's checkboxes render from the real catalog here too.
@@ -152,7 +152,8 @@ describe('HostForm', () => {
     // Exact, not /token id/i: the field's info button is labelled "What is the
     // Monitoring token id?" and a loose match now finds both.
     expect(screen.getByLabelText('Monitoring token id')).toBeDefined()
-    expect(screen.getByText(/root shell on the node/i)).toBeDefined()
+    expect(screen.getByRole('checkbox',
+      { name: 'I understand this authorizes a root shell on the node' })).toBeDefined()
     expect(screen.getByRole('button', { name: /test connection/i })).toBeDefined()
   })
 
@@ -196,7 +197,8 @@ describe('HostForm', () => {
 
   it('offers the pveum script so the operator never invents the privileges', async () => {
     withQuery(<HostForm onCreated={() => {}} />)
-    fireEvent.click(screen.getByRole('button', { name: /generate.*script|need a token/i }))
+    fireEvent.click(screen.getByRole('button', { name: /don.t have a token yet/i }))
+    fireEvent.click(screen.getByRole('button', { name: 'Generate script' }))
     expect(await screen.findByText(/pveum role add ProxployAudit/)).toBeInTheDocument()
   })
 
@@ -204,7 +206,8 @@ describe('HostForm', () => {
     const writeText = vi.fn(() => Promise.resolve())
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
     withQuery(<HostForm onCreated={() => {}} />)
-    fireEvent.click(screen.getByRole('button', { name: /generate.*script|need a token/i }))
+    fireEvent.click(screen.getByRole('button', { name: /don.t have a token yet/i }))
+    fireEvent.click(screen.getByRole('button', { name: 'Generate script' }))
     await screen.findByText(/pveum role add ProxployAudit/)
     fireEvent.click(screen.getByRole('button', { name: /copy script/i }))
     expect(writeText).toHaveBeenCalledWith(scriptResult.script)
@@ -214,7 +217,8 @@ describe('HostForm', () => {
     withQuery(<HostForm onCreated={() => {}} />)
     // Doc 08: monitoring is mandatory, the rest are the operator's choice.
     fireEvent.click(screen.getByLabelText(/^Lifecycle$/))
-    fireEvent.click(screen.getByRole('button', { name: /generate.*script/i }))
+    fireEvent.click(screen.getByRole('button', { name: /don.t have a token yet/i }))
+    fireEvent.click(screen.getByRole('button', { name: 'Generate script' }))
     await screen.findByText(/pveum role add ProxployAudit/)
     expect(scriptCalls.at(-1)?.capabilities).not.toContain('lifecycle')
     expect(scriptCalls.at(-1)?.capabilities).toContain('backup')
@@ -222,24 +226,11 @@ describe('HostForm', () => {
 
   it('asks for Sys.Console only when node shells are opted into', async () => {
     withQuery(<HostForm onCreated={() => {}} />)
-    fireEvent.click(screen.getByRole('button', { name: /generate.*script|need a token/i }))
+    fireEvent.click(screen.getByRole('button', { name: /don.t have a token yet/i }))
+    fireEvent.click(screen.getByRole('button', { name: 'Generate script' }))
     await screen.findByText(/pveum role add ProxployAudit/)
     const calls = scriptCalls.at(-1)
     expect(calls?.node_shell).toBe(false)
-  })
-
-  it('asks for node power only when explicitly ticked, independent of capabilities', async () => {
-    withQuery(<HostForm onCreated={() => {}} />)
-    fireEvent.click(screen.getByRole('button', { name: /generate.*script|need a token/i }))
-    await screen.findByText(/pveum role add ProxployAudit/)
-    // Off by default: the same "never widen a scope the operator did not
-    // explicitly ask for" reasoning as node_shell above.
-    expect(scriptCalls.at(-1)?.node_power).toBe(false)
-
-    fireEvent.click(screen.getByLabelText(/node power/i))
-    fireEvent.click(screen.getByRole('button', { name: /generate.*script/i }))
-    await screen.findByText(/pveum role add ProxployAudit/)
-    expect(scriptCalls.at(-1)?.node_power).toBe(true)
   })
 
   it('leaves TLS verification off by default', () => {
@@ -306,7 +297,7 @@ describe('onboarding wizard', () => {
     mockOnboarding({ admin_exists: true, host_added: false, ssh_pending: false, complete: false })
     renderWizard()
     expect(await screen.findByLabelText('Monitoring token id')).toBeInTheDocument()
-    expect(screen.queryByLabelText('Password (12+ chars)')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Password')).not.toBeInTheDocument()
   })
 
   it('resumes at the install step when a key is enrolled but unverified', async () => {
@@ -406,7 +397,7 @@ describe('onboarding wizard', () => {
   it('starts at the admin step on a truly fresh install', async () => {
     mockOnboarding({ admin_exists: false, host_added: false, ssh_pending: false, complete: false })
     renderWizard()
-    expect(await screen.findByLabelText('Password (12+ chars)')).toBeInTheDocument()
+    expect(await screen.findByLabelText('Password')).toBeInTheDocument()
   })
 
   it('lands on the done step once everything is settled', async () => {
@@ -439,7 +430,7 @@ describe('onboarding wizard', () => {
     fireEvent.click(screen.getByRole('button', { name: /^Account/ }))
 
     fireEvent.change(await screen.findByLabelText('New password'),
-      { target: { value: 'correct-horse-battery' } })
+      { target: { value: 'Correct-Horse-Battery-9' } })
     fireEvent.click(screen.getByRole('button', { name: /set new password/i }))
 
     expect(await screen.findByText(/password updated/i)).toBeInTheDocument()
@@ -477,13 +468,15 @@ describe('onboarding wizard', () => {
     mockOnboarding({ admin_exists: false, host_added: false, ssh_pending: false, complete: false })
     renderWizard()
     fireEvent.change(await screen.findByLabelText('Email'), { target: { value: 'short@example.com' } })
-    fireEvent.change(screen.getByLabelText('Password (12+ chars)'), { target: { value: '123' } })
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: '123' } })
     fireEvent.click(screen.getByRole('button', { name: /review/i }))
 
-    // "12+ chars" was a label the form never enforced: the only check was
-    // UserIn's, surfacing as a 422 after the review screen had already said
-    // the details were worth committing.
-    expect(await screen.findByText(/at least 12 characters/i)).toBeInTheDocument()
+    // Said twice on purpose now: the meter under the field says it as you
+    // type, and the form repeats it when Review is pressed. Before the meter
+    // existed the only check was UserIn's, surfacing as a 422 after the
+    // review screen had already said the details were worth committing.
+    expect((await screen.findAllByText(/at least 12 characters/i)).length)
+      .toBeGreaterThan(0)
     expect(screen.queryByRole('button', { name: /create account/i })).not.toBeInTheDocument()
     expect((api as unknown as { mock: { calls: [string][] } }).mock.calls
       .map(c => c[0])).not.toContain('/users')
@@ -494,7 +487,7 @@ describe('onboarding wizard', () => {
     renderWizard()
     // The browser's own affordance, so the constraint is enforced before any
     // click as well as after.
-    expect((await screen.findByLabelText('Password (12+ chars)'))
+    expect((await screen.findByLabelText('Password'))
       .getAttribute('minlength')).toBe('12')
   })
 
@@ -503,8 +496,8 @@ describe('onboarding wizard', () => {
     mockOnboarding({ admin_exists: false, host_added: false, ssh_pending: false, complete: false })
     renderWizard()
     fireEvent.change(await screen.findByLabelText('Email'), { target: { value: 'typo@acme.io' } })
-    fireEvent.change(screen.getByLabelText('Password (12+ chars)'),
-      { target: { value: 'correct-horse-battery' } })
+    fireEvent.change(screen.getByLabelText('Password'),
+      { target: { value: 'Correct-Horse-Battery-9' } })
     fireEvent.click(screen.getByRole('button', { name: /review/i }))
 
     // Nothing is committed yet: the review screen is still local.

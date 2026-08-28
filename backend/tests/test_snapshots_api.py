@@ -220,11 +220,11 @@ def test_rollback_requires_admin(tmp_path, csrf_header, bootstrap_admin):
     vid = ids["vm_id"]
     with c:
         c.post("/api/v1/users", json={"email": "op@example.com",
-                                      "password": "correct-horse-battery",
+                                      "password": "Correct-Horse-Battery-9",
                                       "display_name": "Op", "role": "operator"},
                headers=csrf_header(c))
         c.post("/api/v1/auth/login", json={"email": "op@example.com",
-                                           "password": "correct-horse-battery"},
+                                           "password": "Correct-Horse-Battery-9"},
                headers=csrf_header(c))
         # an operator may take and delete snapshots …
         assert c.post(f"/api/v1/vms/{vid}/snapshots", json={"name": "opsnap"},

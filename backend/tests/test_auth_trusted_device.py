@@ -12,7 +12,7 @@ from proxploy.services import totp
 from tests.support import make_app
 
 EMAIL = "admin@example.com"
-PASSWORD = "correct-horse-battery"
+PASSWORD = "Correct-Horse-Battery-9"
 COOKIE = "pp_trusted"
 
 
@@ -217,7 +217,7 @@ def test_a_password_reset_drops_every_trusted_device(tmp_path, csrf_header,
         with app.state.sessionmaker() as db:
             uid = db.query(User).filter_by(email=EMAIL).one().id
         r = c.post(f"/api/v1/users/{uid}/password", headers=h,
-                   json={"password": "a-different-correct-horse"})
+                   json={"password": "A-Different-Correct-Horse-9"})
         assert r.status_code == 200, r.text
         with app.state.sessionmaker() as db:
             assert db.query(TrustedDevice).filter(

@@ -217,11 +217,11 @@ def test_create_requires_admin(tmp_path, csrf_header, bootstrap_admin):
     app, c, _f, ids = _authed(tmp_path, bootstrap_admin)
     with c:
         c.post("/api/v1/users", json={"email": "op@example.com",
-                                      "password": "correct-horse-battery",
+                                      "password": "Correct-Horse-Battery-9",
                                       "display_name": "Op", "role": "operator"},
                headers=csrf_header(c))
         c.post("/api/v1/auth/login", json={"email": "op@example.com",
-                                           "password": "correct-horse-battery"},
+                                           "password": "Correct-Horse-Battery-9"},
                headers=csrf_header(c))
         r = c.post("/api/v1/vms", json=_spec(ids), headers=csrf_header(c))
         assert r.status_code == 403 and r.json()["detail"] == "Your role does not allow this."
@@ -451,11 +451,11 @@ def test_delete_requires_owner_role(tmp_path, csrf_header, bootstrap_admin):
     app, c, _f, ids = _authed(tmp_path, bootstrap_admin)
     with c:
         c.post("/api/v1/users", json={"email": "adm@example.com",
-                                      "password": "correct-horse-battery",
+                                      "password": "Correct-Horse-Battery-9",
                                       "display_name": "Adm", "role": "admin"},
                headers=csrf_header(c))
         c.post("/api/v1/auth/login", json={"email": "adm@example.com",
-                                           "password": "correct-horse-battery"},
+                                           "password": "Correct-Horse-Battery-9"},
                headers=csrf_header(c))
         assert c.post(f"/api/v1/vms/{ids['vm_id']}/clone", json={},
                       headers=csrf_header(c)).status_code == 202

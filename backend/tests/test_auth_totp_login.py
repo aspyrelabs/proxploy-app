@@ -11,7 +11,7 @@ from proxploy.services import totp
 from tests.support import make_app
 
 EMAIL = "admin@example.com"
-PASSWORD = "correct-horse-battery"
+PASSWORD = "Correct-Horse-Battery-9"
 
 
 def _enable_totp(app):

@@ -1,3 +1,4 @@
+import { RecoverDialog } from './RecoverDialog'
 import { useEffect, useRef, useState } from 'react'
 import { api, apiErrorDetail, ApiError } from '../api/client'
 import { fetchOnboarding } from '../api/account'
@@ -18,6 +19,7 @@ type LoginResult = { ok?: true; user?: unknown; totp_required?: true; pending?: 
 export function LoginForm({ onSuccess }: { onSuccess: () => void }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [recovering, setRecovering] = useState(false)
   const [code, setCode] = useState('')
   const [remember, setRemember] = useState(false)
   const [pending, setPending] = useState<string | null>(null)
@@ -51,6 +53,9 @@ export function LoginForm({ onSuccess }: { onSuccess: () => void }) {
       // wrong (a 422 validation error, most often); apiErrorDetail's
       // fallback only fires when the request itself never got a response,
       // which is the one case "is the server reachable?" is honest about.
+      // 423 is the lockout, and it says how long is left; it must not be
+      // flattened into "invalid email or password", which would have somebody
+      // retyping a password that is already right.
       setError(err instanceof ApiError && err.status === 401
         ? 'Invalid email or password.'
         : apiErrorDetail(err, 'Sign-in failed, is the server reachable?'))
@@ -106,6 +111,15 @@ export function LoginForm({ onSuccess }: { onSuccess: () => void }) {
       <input id="password" type="password" required value={password} onChange={e => setPassword(e.target.value)} className={inputCls + ' mb-5'} />
       {error && <p className="mb-3 text-[12.5px] text-red">{error}</p>}
       <Button type="submit" disabled={busy} className="w-full">{busy ? 'Signing in…' : 'Sign in'}</Button>
+      <button type="button" onClick={() => setRecovering(true)}
+        className="mt-3 block w-full text-center text-[12.5px] text-text-2
+                   underline-offset-2 hover:text-text hover:underline">
+        Forgot your password?
+      </button>
+      {recovering && (
+        <RecoverDialog email={email} onClose={() => setRecovering(false)}
+          onDone={() => { setRecovering(false); setError(''); setPassword('') }} />
+      )}
       {oidc && (
         <a href="/api/v1/auth/oidc/login"
           className="mt-3 block text-center text-[12.5px] text-text-2 underline-offset-2 hover:text-text hover:underline">

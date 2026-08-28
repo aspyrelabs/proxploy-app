@@ -13,7 +13,7 @@ from proxploy.services.authn import _th
 from tests.support import make_app
 
 ADMIN_EMAIL = "admin@example.com"
-PASSWORD = "correct-horse-battery"
+PASSWORD = "Correct-Horse-Battery-9"
 
 
 def _login(c, h, email=ADMIN_EMAIL, password=PASSWORD):
@@ -61,10 +61,10 @@ def test_deleting_another_users_session_is_404(tmp_path, csrf_header, bootstrap_
         admin_raw = c.cookies["pp_session"]
 
         r = c.post("/api/v1/users", json={"email": "op@example.com",
-                    "password": "another-correct-pw", "role": "operator"},
+                    "password": "Another-Correct-Pw-9", "role": "operator"},
                     headers=h, cookies={"pp_session": admin_raw})
         assert r.status_code == 201
-        op_raw = _login(c, h, email="op@example.com", password="another-correct-pw")
+        op_raw = _login(c, h, email="op@example.com", password="Another-Correct-Pw-9")
 
         op_sessions = c.get("/api/v1/auth/sessions", cookies={"pp_session": op_raw}).json()
         assert len(op_sessions) == 1

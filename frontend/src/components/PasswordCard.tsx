@@ -1,3 +1,5 @@
+import { PasswordStrength } from './PasswordStrength'
+import { refusal } from '../lib/password-strength'
 import { useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { api, apiErrorDetail } from '../api/client'
@@ -67,10 +69,12 @@ export function PasswordCard() {
         Changing it signs out every other session, including any you have forgotten about.
       </p>
       <div className="max-w-md">
-        <label htmlFor="profile-pw" className={label}>New password (12+ chars)</label>
+        <label htmlFor="profile-pw" className={label}>New password</label>
         <input id="profile-pw" type="password" className={inputCls} value={pw}
           onChange={e => setPw(e.target.value)} />
-        <Button className="mt-2" disabled={busy || pw.length < 12} onClick={savePassword}>
+        <PasswordStrength value={pw} email={me?.email} />
+        <Button className="mt-2" disabled={busy || refusal(pw) !== null}
+          onClick={savePassword}>
           Set new password
         </Button>
       </div>

@@ -120,7 +120,7 @@ def test_search_never_reveals_a_resource_the_caller_cannot_read(
         bootstrap_admin(c)
         seed()
         r = c.post("/api/v1/users", json={"email": "nobody@example.com",
-                                          "password": "correct-horse-battery",
+                                          "password": "Correct-Horse-Battery-9",
                                           "role": "viewer"},
                    headers=csrf_header(c))
         uid = r.json()["id"]
@@ -138,7 +138,7 @@ def test_search_never_reveals_a_resource_the_caller_cannot_read(
         with other:
             login = other.post("/api/v1/auth/login",
                                json={"email": "nobody@example.com",
-                                     "password": "correct-horse-battery"},
+                                     "password": "Correct-Horse-Battery-9"},
                                headers=csrf_header(other))
             assert login.status_code == 200, login.text
             got = other.get("/api/v1/search", params={"q": "immich"})

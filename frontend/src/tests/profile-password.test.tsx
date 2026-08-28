@@ -68,7 +68,7 @@ function renderPassword() {
   return wrap(<><PasswordCard /><SessionsCard /></>)
 }
 
-async function setPassword(pw = 'a-long-enough-password') {
+async function setPassword(pw = 'Correct-Horse-Battery-9') {
   await waitFor(() => expect(screen.getByLabelText(/new password/i)).toBeInTheDocument())
   fireEvent.change(screen.getByLabelText(/new password/i), { target: { value: pw } })
   fireEvent.click(screen.getByRole('button', { name: /set new password/i }))

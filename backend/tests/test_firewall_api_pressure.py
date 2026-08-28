@@ -31,7 +31,7 @@ from proxploy.models import (App, AuditEvent, Host, HostCredential, Team,
                              TeamMember, User, Vm)
 from proxploy.services.proxmox import ProxmoxError
 
-PASSWORD = "correct-horse-battery"
+PASSWORD = "Correct-Horse-Battery-9"
 
 # ---------------------------------------------------------------- the world
 
