@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { api } from '../api/client'
 import { Button } from './ui/button'
+import { Icon } from './ui/icon'
 
 /** Capabilities and the two extra roles are read from the caller on every
  *  click, not copied in once: HostForm's own checkboxes decide them live, so
@@ -11,6 +12,10 @@ export function HostScriptPanel({ capabilities, nodeShell, nodePower }: {
 }) {
   const [script, setScript] = useState<string | null>(null)
   const [error, setError] = useState('')
+  // Shut until asked. Most operators arrive with a token already made, and an
+  // always-open generator put a script block between them and the fields they
+  // came to fill in.
+  const [open, setOpen] = useState(false)
 
   async function generate() {
     setError('')
@@ -26,14 +31,27 @@ export function HostScriptPanel({ capabilities, nodeShell, nodePower }: {
 
   return (
     <>
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-[12.5px] text-text-2">Don't have a token yet?</p>
-        <Button type="button" variant="ghost" onClick={generate}>
+      <button type="button" aria-expanded={open} onClick={() => setOpen(o => !o)}
+        className="flex w-full items-center gap-1.5 text-left text-[12.5px] text-text-2
+                   transition hover:text-text">
+        <Icon name="expand_more" size={16}
+          className={`shrink-0 text-text-3 transition-transform motion-reduce:transition-none
+                      ${open ? 'rotate-180 text-amber' : ''}`} />
+        Don&rsquo;t have a token yet?
+      </button>
+      {open && (
+        <p className="mt-1.5 text-[11.5px] text-text-3">
+          Proxploy can write the commands that create one. Tick the capabilities
+          you want first: the script only creates roles for those.
+        </p>
+      )}
+      {open && (
+        <Button type="button" variant="ghost" className="mt-2" onClick={generate}>
           Generate setup script
         </Button>
-      </div>
-      {error && <p className="mt-2 text-[12.5px] text-red">{error}</p>}
-      {script && (
+      )}
+      {open && error && <p className="mt-2 text-[12.5px] text-red">{error}</p>}
+      {open && script && (
         <>
           <p className="mt-2 text-[11.5px] text-text-3">
             Run this in a shell on the node. It creates a dedicated user with

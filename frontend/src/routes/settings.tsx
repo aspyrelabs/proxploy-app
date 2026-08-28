@@ -35,6 +35,8 @@ import { SessionsCard } from '../components/SessionsCard'
 import { TrustedDevicesCard } from '../components/TrustedDevicesCard'
 import { UpdateCard } from '../components/UpdateCard'
 import { Button } from '../components/ui/button'
+import { Dialog } from '../components/ui/dialog'
+import { Icon } from '../components/ui/icon'
 import { CardLoadingOverlay } from '../components/ui/card-loading-overlay'
 import { Skeleton, SkeletonGroup, SkeletonTable } from '../components/ui/skeleton'
 import { useTeams } from '../api/teams'
@@ -629,9 +631,27 @@ export function SettingsPage() {
             </div>
           )}
         </QueryState>
-        {adding && <div className="mt-4 border-t border-line-soft pt-4">
-          <HostForm onCreated={() => { setAdding(false); qc.invalidateQueries({ queryKey: ['hosts'] }) }} />
-        </div>}
+        {adding && (
+          <Dialog width={560} scrollBody onClose={() => setAdding(false)}
+            title={
+              <span className="flex min-w-0 items-center gap-2.5">
+                <span className="grid size-8 shrink-0 place-items-center rounded-tile
+                                 border border-line bg-panel-2 text-amber">
+                  <Icon name="dns" size={18} />
+                </span>
+                <span className="flex min-w-0 flex-col leading-tight">
+                  <span className="truncate">Add a host</span>
+                  <span className="truncate font-mono text-[11px] font-normal text-text-3">
+                    proxmox ve · api token
+                  </span>
+                </span>
+              </span>}>
+            <HostForm onCreated={() => {
+              setAdding(false)
+              qc.invalidateQueries({ queryKey: ['hosts'] })
+            }} />
+          </Dialog>
+        )}
         {editingHost && (
           <HostEditDialog hostId={editingHost.id} host={editingHost}
             onClose={() => setEditingHost(null)} />

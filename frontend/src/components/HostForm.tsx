@@ -16,9 +16,9 @@ export type HostCreated = {
   node_name?: string | null; cluster_name?: string | null
 }
 
-const CONSENT_COPY = 'App Store installs run community scripts through a dedicated ' +
-  'SSH key, a root shell on the node, exactly as if you ran them yourself. ' +
-  'Optional: skip it and everything except installs/updates/migration still works.'
+const CONSENT_COPY = 'App Store installs run community scripts through a dedicated '
+  + 'SSH key, a root shell on the node, exactly as if you ran them yourself. Leave '
+  + 'this unticked and everything except installs, updates and migration still works.'
 
 // Each kind names a different fix. "Request failed" named none of them.
 const KIND_COPY: Record<string, string> = {
@@ -109,6 +109,8 @@ function FieldInfo({ label, body }: { label: string; body: React.ReactNode }) {
     </>
   )
 }
+
+const BAND = 'border-t border-line-soft pt-3 text-[11px] uppercase tracking-wide text-text-3'
 
 export function HostForm({ onCreated }: { onCreated: (h: HostCreated) => void }) {
   const qc = useQueryClient()
@@ -208,13 +210,13 @@ export function HostForm({ onCreated }: { onCreated: (h: HostCreated) => void })
   }
 
   return (
-    <form onSubmit={submit} className="space-y-4">
+    <form onSubmit={submit} className="mt-4 space-y-3">
+      <h3 className={BAND.replace('border-t border-line-soft pt-3 ', '')}>The node</h3>
       {([['name', 'Name', 'pve-01'], ['address', 'Address', 'https://10.0.0.5:8006']] as const)
         .map(([k, label, ph]) => (
         <div key={k}>
-          <div className="mb-1 flex flex-wrap items-center gap-x-1.5 gap-y-1">
-            <label htmlFor={k} className="block text-[11px] uppercase tracking-wide text-text-3">{label}</label>
-          </div>
+          <label htmlFor={k}
+            className="mb-1 block text-[11px] uppercase tracking-wide text-text-3">{label}</label>
           <input id={k} required placeholder={ph} className={inputCls}
             value={f[k]} onChange={e => set(k, e.target.value)} />
         </div>
@@ -223,20 +225,11 @@ export function HostForm({ onCreated }: { onCreated: (h: HostCreated) => void })
         <input type="checkbox" checked={f.verify_tls}
           onChange={e => set('verify_tls', e.target.checked)} /> Verify TLS certificate
       </label>
-      <label className="flex items-start gap-2 text-[13px] text-text-2">
-        <input type="checkbox" checked={f.ssh_enroll}
-          onChange={e => set('ssh_enroll', e.target.checked)} className="mt-0.5" />
-        <span>Enable App Store installs (SSH key enrolment).
-          <span className="block text-[12px] text-text-3">
-            I understand this authorizes a root shell on the node: {CONSENT_COPY}
-          </span>
-        </span>
-      </label>
+      <h3 className={BAND}>What Proxploy may do here</h3>
       {/* One box for all four capability tokens. Monitoring is mandatory and
               creates the host, so its row always renders; the other three are
               optional and only appear once ticked. */}
-      <div className="rounded-ctl border border-line bg-panel-2 p-3">
-        <HostScriptPanel capabilities={caps} nodeShell={f.ssh_enroll} nodePower={nodePower} />
+      <div className="space-y-2">
         {/* Monitoring is mandatory, the rest are the operator's call. Anything
                   left unticked gets no role and no token at all. Unticking one
                   shows what it would have covered, right under it. */}
@@ -270,6 +263,8 @@ export function HostForm({ onCreated }: { onCreated: (h: HostCreated) => void })
                   unticked capability got no role and no token from the script.
                   All four are visible once the host exists. */}
         <div className="mt-3 space-y-3 border-t border-line-soft pt-3">
+          <h3 className="text-[11px] uppercase tracking-wide text-text-3">Tokens</h3>
+          <HostScriptPanel capabilities={caps} nodeShell={f.ssh_enroll} nodePower={nodePower} />
           {/* flex-wrap is load-bearing: FieldInfo's explanation is basis-full so
               it drops onto its own line under the label. Without wrapping it
               squeezes alongside and the label collapses into a column. */}
@@ -347,6 +342,15 @@ export function HostForm({ onCreated }: { onCreated: (h: HostCreated) => void })
               Can take down every guest it runs, and Proxploy itself if it runs here.
             </span>
           </span>
+        </label>
+      </div>
+
+      <div className="rounded-ctl border border-line-soft bg-elev p-3">
+        <p className="text-[12px] text-text-2">{CONSENT_COPY}</p>
+        <label className="mt-2 flex items-center gap-2 text-[12px] text-text">
+          <input type="checkbox" checked={f.ssh_enroll}
+            onChange={e => set('ssh_enroll', e.target.checked)} />
+          I understand this authorizes a root shell on the node
         </label>
       </div>
 
