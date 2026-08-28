@@ -44,6 +44,10 @@ TYPES: tuple[NotificationType, ...] = (
     NotificationType("alert.resolved", "Alert resolved", "Alerts"),
     NotificationType("audit.error", "Audited action failed", "Audit"),
     NotificationType("update.available", "Update available", "Housekeeping"),
+    NotificationType("catalog.apps_unavailable",
+                     "Apps can no longer be installed", "App Store"),
+    NotificationType("catalog.apps_available",
+                     "New apps can be installed", "App Store"),
 )
 
 BY_KEY: dict[str, NotificationType] = {t.key: t for t in TYPES}

@@ -29,6 +29,7 @@ import httpx
 
 from proxploy.jobs import HANDLERS, JobContext, JobFailed
 from proxploy.models import CatalogEntry
+from proxploy.services.notifier import notify
 from proxploy.services.catalog_categories import category_for
 from proxploy.services.classifier import (UNSUPPORTED_ADDON_DELEGATED,
                                           addon_delegation_slug,
@@ -171,14 +172,20 @@ def run_discovery(db) -> dict:
     sha = head_sha()
     discovered = discover_tree(sha)
     counts: dict[str, int] = {}
+    # What each row's verdict WAS before its commit moved, for the slugs whose
+    # classification is about to be cleared. Read here because the row is
+    # wiped in place: by the time the backlog reclassifies it, the old answer
+    # is gone and there is nothing left to compare against.
+    was: dict[str, bool] = {}
     for d in discovered:
         counts[d["entry_type"]] = counts.get(d["entry_type"], 0) + 1
-        _upsert_skeleton(db, d, sha)
+        _upsert_skeleton(db, d, sha, was)
     db.commit()
-    return {"upstream_sha": sha, "total": len(discovered), "counts": counts}
+    return {"upstream_sha": sha, "total": len(discovered), "counts": counts,
+            "was_installable": was}
 
 
-def _upsert_skeleton(db, d: dict, sha: str) -> None:
+def _upsert_skeleton(db, d: dict, sha: str, was: dict | None = None) -> None:
     row = db.query(CatalogEntry).filter_by(slug=d["slug"]).one_or_none()
     if row is not None and row.upstream_sha == sha and row.entry_type == d["entry_type"]:
         return  # nothing changed upstream since the last refresh
@@ -203,6 +210,8 @@ def _upsert_skeleton(db, d: dict, sha: str) -> None:
         # to the OLD commit and is no longer what run_install would execute.
         # Clear it so ensure_classified re-fetches fresh content at the new
         # sha rather than silently keep serving a stale classification.
+        if row.installable is not None and was is not None:
+            was[row.slug] = bool(row.installable)
         row.installable = None
         row.unsupported_reason = None
         row.raw = _keep_metadata(row, None)
@@ -596,7 +605,9 @@ async def refresh_catalog(ctx: JobContext, params: dict) -> dict:
     # usable (names, types, categories from discovery alone) before this job
     # even starts.
     with app.state.sessionmaker() as db:
-        backlog_job = app.state.jobs.enqueue(db, kind="catalog.classify_backlog")
+        backlog_job = app.state.jobs.enqueue(
+            db, kind="catalog.classify_backlog",
+            params={"was_installable": result.get("was_installable") or {}})
     ctx.log(f"queued background classification job {backlog_job.id}")
     result["classify_backlog_job_id"] = backlog_job.id
 
@@ -606,6 +617,46 @@ async def refresh_catalog(ctx: JobContext, params: dict) -> dict:
 
 
 HANDLERS["catalog.refresh"] = refresh_catalog
+
+
+# How many apps the body names before it counts the rest.
+NAMES_IN_BODY = 4
+
+
+def _transitions(db, was: dict) -> tuple[list[tuple[str, str]], list[str]]:
+    lost, gained = [], []
+    for slug, before in was.items():
+        row = db.query(CatalogEntry).filter_by(slug=slug).one_or_none()
+        if row is None or row.installable is None:
+            continue
+        if before and not row.installable:
+            lost.append((row.name or slug, row.unsupported_reason or "no reason recorded"))
+        elif not before and row.installable:
+            gained.append(row.name or slug)
+    return lost, gained
+
+
+def _say_lost(lost: list[tuple[str, str]]) -> tuple[str, str]:
+    title = ("1 app can no longer be installed" if len(lost) == 1
+             else f"{len(lost)} apps can no longer be installed")
+    body = ["Upstream changed their install scripts and Proxploy can no longer "
+            "answer everything they ask."]
+    body += [f"{name}: {reason}" for name, reason in lost[:NAMES_IN_BODY]]
+    if len(lost) > NAMES_IN_BODY:
+        body.append(f"and {len(lost) - NAMES_IN_BODY} more.")
+    body.append("Apps you already installed are unaffected and keep running.")
+    return title, "\n".join(body)
+
+
+def _say_gained(gained: list[str]) -> tuple[str, str]:
+    title = ("1 more app can be installed" if len(gained) == 1
+             else f"{len(gained)} more apps can be installed")
+    named = ", ".join(gained[:NAMES_IN_BODY])
+    rest = len(gained) - NAMES_IN_BODY
+    body = (f"{named} and {rest} others are now in the App Store."
+            if rest > 0 else f"{named} {'is' if len(gained) == 1 else 'are'} "
+                             f"now in the App Store.")
+    return title, body
 
 
 async def classify_backlog(ctx: JobContext, params: dict) -> dict:
@@ -622,6 +673,23 @@ async def classify_backlog(ctx: JobContext, params: dict) -> dict:
     ctx.log(f"classified {result['done']}, {len(result['failed'])} failed")
     for f in result["failed"]:
         ctx.log(f"{f['slug']}: {f['reason']}", stream="stderr")
+    # Only a row whose verdict actually MOVED is worth saying out loud. A
+    # refresh that changed nothing must stay silent, which is why this reads
+    # the verdicts discovery captured rather than the whole catalog.
+    was = params.get("was_installable") or {}
+    if was:
+        with app.state.sessionmaker() as db:
+            lost, gained = _transitions(db, was)
+        if lost:
+            title, body = _say_lost(lost)
+            ctx.log(title)
+            notify(app, "catalog.apps_unavailable", title, body)
+        if gained:
+            title, body = _say_gained(gained)
+            ctx.log(title)
+            notify(app, "catalog.apps_available", title, body)
+        result["lost"] = [name for name, _ in lost]
+        result["gained"] = gained
     ctx.progress(100)
     if result["done"]:
         app.state.bus.publish("resource", {"type": "catalog", "change": "list"})
