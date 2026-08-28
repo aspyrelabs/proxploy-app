@@ -109,6 +109,7 @@ def _candidate(url: str) -> bool:
         if parts.hostname is None:
             return False
         ipaddress.ip_address(parts.hostname)
+        parts.port
     except ValueError:
         return False
     return True
@@ -136,7 +137,7 @@ def url_from_install_log(lines, *, expected_port: int | None = None,
     seen: list[str] = []
     for raw in list(lines)[-TAIL_LINES:]:
         for match in _URL.finditer(_ANSI.sub("", raw or "")):
-            url = match.group(0).rstrip(".,;")
+            url = match.group(0).rstrip(".,;$|")
             if url not in seen and _candidate(url):
                 seen.append(url)
     if len(seen) == 1:
