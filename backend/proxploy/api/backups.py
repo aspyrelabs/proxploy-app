@@ -51,7 +51,7 @@ _sync_enqueue_lock = threading.Lock()
 def _backup_out(b: Backup, host_name: str | None) -> dict:
     return {
         "id": b.id, "host_id": b.host_id, "host_name": host_name,
-        "storage": b.storage, "volid": b.volid,
+        "storage": b.storage, "volid": b.volid, "node": b.node,
         "guest_type": b.guest_type, "guest_vmid": b.guest_vmid,
         "guest_name": b.guest_name, "taken_at": to_iso(b.taken_at),
         "size_bytes": b.size_bytes, "verify_state": b.verify_state,

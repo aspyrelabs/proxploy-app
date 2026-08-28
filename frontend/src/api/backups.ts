@@ -8,6 +8,7 @@ export type BackupRow = {
   host_name: string | null
   storage: string | null
   volid: string
+  node: string | null
   guest_type: string | null
   guest_vmid: number | null
   guest_name: string | null
@@ -142,7 +143,8 @@ export function useTestRestore() {
   })
 }
 
-export type RestoreVars = { id: number; mode: 'new' | 'in_place'; confirm?: string }
+export type RestoreVars = { id: number; mode: 'new' | 'in_place'; confirm?: string;
+                            storage?: string }
 
 export function useRestoreBackup() {
   const qc = useQueryClient()
@@ -150,7 +152,8 @@ export function useRestoreBackup() {
     mutationFn: (v) =>
       api<{ job: JobRow }>(`/backups/${v.id}/restore`, {
         method: 'POST',
-        body: JSON.stringify(v.confirm ? { mode: v.mode, confirm: v.confirm } : { mode: v.mode }),
+        body: JSON.stringify({ mode: v.mode, ...(v.confirm ? { confirm: v.confirm } : {}),
+                               ...(v.storage ? { storage: v.storage } : {}) }),
       }),
     onSettled: jobSettled(qc),
   })

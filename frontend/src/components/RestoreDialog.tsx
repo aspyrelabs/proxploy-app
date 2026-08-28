@@ -1,6 +1,10 @@
 import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import type { BackupRow } from '../api/backups'
 import { useRestoreBackup } from '../api/backups'
+import { api } from '../api/client'
+import { useStorage } from '../api/storage'
+import { poolsFrom } from './install/pools'
 // errBody: the shared unwrapper for 409 error bodies.
 import { errBody } from '../api/network'
 import { ConfirmSelfDialog } from './ConfirmSelfDialog'
@@ -22,11 +26,19 @@ import { Loading } from './ui/loading'
  *  - `guest_running` / `guest_missing` / `guest_status_unknown`, same
  *    treatment: state the reason.
  */
+type HostRow = { id: number; node_name?: string | null; cluster_name?: string | null }
+
 export function RestoreDialog({ backup, onClose }: {
   backup: BackupRow; onClose: () => void
 }) {
   const restore = useRestoreBackup()
   const [mode, setMode] = useState<'new' | 'in_place'>('new')
+  const [storage, setStorage] = useState('')
+  const hosts = useQuery({ queryKey: ['hosts'], queryFn: () => api<HostRow[]>('/hosts') })
+  const host = (hosts.data ?? []).find((h) => h.id === backup.host_id)
+  const pools = poolsFrom(useStorage().data, backup.host_id,
+                          backup.node ?? host?.node_name, host?.cluster_name,
+                          backup.guest_type === 'ct' ? 'rootdir' : 'images')
   const [guard, setGuard] = useState<{ phrase: string; detail: string } | null>(null)
   const [refusal, setRefusal] = useState('')
   const [jobId, setJobId] = useState<number | null>(null)
@@ -34,7 +46,7 @@ export function RestoreDialog({ backup, onClose }: {
 
   const fire = (confirm?: string) => {
     setRefusal('')
-    restore.mutate({ id: backup.id, mode, confirm }, {
+    restore.mutate({ id: backup.id, mode, confirm, storage: storage || undefined }, {
       onSuccess: (r) => { setGuard(null); setJobId(r.job.id) },
       onError: (e) => {
         const b = errBody(e)
@@ -88,6 +100,18 @@ export function RestoreDialog({ backup, onClose }: {
               </span>
             </label>
           </div>
+
+          {pools.length > 1 && (
+            <label className="mt-4 flex flex-wrap items-center gap-2 text-[13px] text-text-2">
+              <span>Restore onto</span>
+              <select value={storage} onChange={(e) => setStorage(e.target.value)}
+                      className="rounded-ctl border border-line bg-panel px-2 py-1
+                                 font-mono text-[11.5px] text-text">
+                <option value="">the roomiest pool that fits</option>
+                {pools.map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </label>
+          )}
 
           {refusal && (
             <p className="mt-3 rounded-ctl border border-red/30 bg-red-dim p-2 text-[12.5px] text-text-2">
