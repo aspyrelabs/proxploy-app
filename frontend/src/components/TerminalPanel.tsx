@@ -56,8 +56,8 @@ function classFor(line: TermLine): string {
   return STREAM_CLASS[line.stream] ?? 'text-text-2'
 }
 
-export function TerminalPanel({ lines, height = 260 }:
-  { lines: TermLine[]; height?: number | 'fill' }) {
+export function TerminalPanel({ lines, height = 260, bare = false }:
+  { lines: TermLine[]; height?: number | 'fill'; bare?: boolean }) {
   const fill = height === 'fill'
   const box = useRef<HTMLDivElement>(null)
   const stick = useRef(true)
@@ -75,13 +75,14 @@ export function TerminalPanel({ lines, height = 260 }:
         stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24
       }}
       style={{ background: '#0a0e14', maxHeight: fill ? undefined : height }}
-      className={`overflow-auto rounded-ctl border border-line-soft p-3 font-mono text-[12.5px] leading-[1.7]${fill ? ' min-h-0' : ''}`}
+      className={`overflow-y-auto overflow-x-hidden p-3 font-mono text-[12.5px] leading-[1.7]${
+        bare ? '' : ' rounded-ctl border border-line-soft'}${fill ? ' min-h-0' : ''}`}
     >
       {lines.length === 0 ? (
         <div className="text-text-3">No output yet.</div>
       ) : (
         lines.map((l, i) => (
-          <div key={i} className={classFor(l)}>
+          <div key={i} className={`whitespace-pre-wrap break-words ${classFor(l)}`}>
             {stripAnsi(l.message)}
           </div>
         ))

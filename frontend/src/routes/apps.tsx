@@ -299,7 +299,8 @@ export const appsRoute = createRoute({
   component: AppsPage,
 })
 
-export function AppLogs({ appId, height }: { appId: number; height?: number | 'fill' }) {
+export function AppLogs({ appId, height, bare }:
+  { appId: number; height?: number | 'fill'; bare?: boolean }) {
   const { data, isError } = useQuery({
     queryKey: ['apps', appId, 'logs'],
     queryFn: () => api<{ stream: string; message: string }[]>(`/apps/${appId}/logs`),
@@ -313,5 +314,5 @@ export function AppLogs({ appId, height }: { appId: number; height?: number | 'f
       note="Proxploy reads a container's logs over SSH to its host. Check that the host is
             connected and the container is running." />
   }
-  return <TerminalPanel lines={data ?? []} height={height} />
+  return <TerminalPanel lines={data ?? []} height={height} bare={bare} />
 }

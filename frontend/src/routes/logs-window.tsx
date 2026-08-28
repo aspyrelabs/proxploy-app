@@ -22,9 +22,9 @@ function LogsWindow() {
   // as siblings; padded because AppLogs' panels already carry their own
   // borders (not edge-to-edge like the console's xterm surface).
   return (
-    <div className="flex h-screen min-h-0 flex-col bg-ink p-8
+    <div className="flex h-screen min-h-0 flex-col
                     [&>div]:min-h-0 [&>div]:flex-1">
-      <AppLogs appId={appId} height="fill" />
+      <AppLogs appId={appId} height="fill" bare />
     </div>
   )
 }
