@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { api, apiErrorDetail } from '../api/client'
 import { notify } from '../lib/notify'
 import { useTotpStatus, useTrustedDevices } from '../api/account'
+import { describeDevice } from '../lib/user-agent'
 import type { TrustedDeviceRow } from '../api/account'
 import { QueryState } from './QueryState'
 import { Button } from './ui/button'
@@ -63,7 +64,9 @@ export function TrustedDevicesCard() {
               {list.map((r) => (
                 <tr key={r.id} className="border-t border-line-soft hover:bg-panel-2">
                   <td className="py-2 font-mono">{r.ip ?? 'unknown'}</td>
-                  <td className="text-text-2">{r.user_agent ?? 'unknown'}</td>
+                  <td className="text-text-2" title={r.user_agent ?? undefined}>
+                    {describeDevice(r.user_agent)}
+                  </td>
                   <td className="text-text-3">{new Date(r.created_at).toLocaleDateString()}</td>
                   <td className="text-text-3">{new Date(r.expires_at).toLocaleDateString()}</td>
                   <td className="py-2 text-right">
