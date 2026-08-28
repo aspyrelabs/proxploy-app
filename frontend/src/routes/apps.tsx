@@ -299,19 +299,19 @@ export const appsRoute = createRoute({
   component: AppsPage,
 })
 
-export function AppLogs({ appId }: { appId: number }) {
+export function AppLogs({ appId, height }: { appId: number; height?: number | 'fill' }) {
   const { data, isError } = useQuery({
     queryKey: ['apps', appId, 'logs'],
     queryFn: () => api<{ stream: string; message: string }[]>(`/apps/${appId}/logs`),
-    // Stop polling once the backend has answered with an error (currently
-    // always, see GET /apps/{id}/logs's 501) instead of retrying a dead
-    // endpoint every 5s forever.
+    // Stop polling once the backend has answered with an error: a stopped
+    // container answers the same way every five seconds.
     refetchInterval: (query) => (query.state.error ? false : 5_000),
     retry: false,
   })
   if (isError) {
-    return <EmptyState title="Logs not available yet"
-      note="Proxploy has no CT journal/exec channel wired up yet; this is a known gap, not a bug." />
+    return <EmptyState title="Logs not readable"
+      note="Proxploy reads a container's logs over SSH to its host. Check that the host is
+            connected and the container is running." />
   }
-  return <TerminalPanel lines={data ?? []} />
+  return <TerminalPanel lines={data ?? []} height={height} />
 }

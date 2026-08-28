@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import difflib
 import hashlib
+import shlex
 
 from fastapi import (APIRouter, Body, Depends, File, HTTPException, Request,
                      UploadFile)
@@ -327,17 +328,59 @@ def app_detail(request: Request, app_id: int, db=Depends(get_db),
                     request.app.state.settings.data_dir)
 
 
-@router.get("/{app_id}/logs")
-def app_logs(app_id: int, db=Depends(get_db), user: User = Depends(_read_scoped)):
-    """No exec or journal channel to a guest exists in this backend: lifecycle
-    and executor/ only run scripts over SSH on the HOST, and ProxmoxClient has
-    no pct-exec equivalent. Rather than fabricate log lines this is a
-    deliberate 501, so the frontend renders an honest gap instead of polling a
-    404 forever."""
-    if db.get(App, app_id) is None:
+LOG_LINES = 300
+
+# systemd containers answer with journalctl; an Alpine one has no journal and
+# logs to /var/log/messages through busybox syslogd. Asked in that order, with
+# a sentence rather than silence for a container that keeps neither.
+LOG_COMMAND = (
+    f"if command -v journalctl >/dev/null 2>&1; then "
+    f"journalctl --no-pager --no-hostname -n {LOG_LINES}; "
+    f"elif [ -f /var/log/messages ]; then tail -n {LOG_LINES} /var/log/messages; "
+    f"elif [ -f /var/log/syslog ]; then tail -n {LOG_LINES} /var/log/syslog; "
+    f"else echo 'this container keeps no journal and no syslog'; fi"
+)
+
+
+@router.get("/{app_id}/logs", dependencies=[Depends(_read)])
+async def app_logs(app_id: int, request: Request, db=Depends(get_db),
+                   user: User = Depends(_read_scoped)):
+    """The container's own log tail, read the way detect_ports reads its
+    sockets: `pct exec` over the host's SSH, because the answer only exists
+    inside the guest and no PVE API route exposes it."""
+    a = db.get(App, app_id)
+    if a is None:
         raise HTTPException(404, "app not found")
-    raise HTTPException(501, "CT log tailing is not implemented yet; there is no "
-                             "journal/exec channel to the guest in this backend")
+    host = db.get(Host, a.host_id)
+    if host is None:
+        raise HTTPException(404, "host not found")
+    executor = SSHExecutor(connect_factory=request.app.state.ssh_connect_factory)
+    lines: list[dict] = []
+
+    def on_new_fingerprint(fp: str) -> None:
+        with request.app.state.sessionmaker() as fdb:
+            h = fdb.get(Host, a.host_id)
+            if h is not None:
+                h.ssh_host_key_fingerprint = fp
+                fdb.commit()
+
+    command = f"pct exec {int(a.ctid)} -- sh -c {shlex.quote(LOG_COMMAND)}"
+    try:
+        status = await executor.run_for_host(
+            request.app.state.sessionmaker, request.app.state.secretstore,
+            a.host_id, host.address, command,
+            pinned_fingerprint=host.ssh_host_key_fingerprint,
+            on_new_fingerprint=on_new_fingerprint,
+            on_line=lambda stream, line: lines.append(
+                {"stream": stream, "message": line}),
+            timeout_s=request.app.state.settings.pve_task_timeout_s)
+    except LookupError as e:
+        raise HTTPException(409, f"reading a container's logs needs SSH access to "
+                                 f"{host.name}, which is not set up: {e}") from e
+    if status != 0 and not lines:
+        raise HTTPException(502, f"could not read {a.name}'s logs (exit {status}). "
+                                 f"The container may be stopped.")
+    return lines
 
 
 @router.get("/{app_id}/ports", dependencies=[Depends(_read)])
