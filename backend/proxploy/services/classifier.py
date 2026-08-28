@@ -214,6 +214,10 @@ DEFAULT_RE = re.compile(r"\[([^\[\]]{1,24})\]\s*:?\s*$")
 # unaudited third-party code on the operator's behalf. Neither is ours to pick,
 # which is why `answerable_without_asking` below refuses to touch one.
 GATE_WINDOW = 8
+# The exit has to be reached by ANSWERING NO. A version prompt exits too,
+# on a value it does not recognise, and that is validation rather than
+# consent, so the window must show the answer being tested for yes.
+GATE_YES_RE = re.compile(r"\[[yY]|\byes\b", re.I)
 EXIT_RE = re.compile(r"\bexit\b")
 
 # A prompt inside a retry loop, which the read shim cannot safely answer.
@@ -312,7 +316,14 @@ def extract_prompts(install_script: str) -> list[dict]:
             m2 = DEFAULT_RE.search(text)
             default = m2.group(1) if m2 else None
         window = "\n".join(lines[i + 1:i + 1 + GATE_WINDOW])
-        gate = bool(EXIT_RE.search(window)
+        # `yesno and`: an exit near the read means "declining aborts" only for a
+        # yes/no question. For any other shape it is validation, not consent:
+        # postgresql reads a version and exits on one it does not recognise,
+        # which this read as a consent gate, so the dialog drew a tick box for
+        # a version number and the route then refused every answer except "y",
+        # which the script rejects as an invalid version. Four apps, node1,
+        # 2026-08-28.
+        gate = bool(GATE_YES_RE.search(window) and EXIT_RE.search(window)
                     and re.search(re.escape(name), window, re.I))
         warnings: list[str] = []
         if gate:
