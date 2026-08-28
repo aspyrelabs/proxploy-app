@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { api } from '../api/client'
 import { Button } from './ui/button'
+import { ButtonGroup, ButtonGroupSeparator } from './ui/button-group'
 import { Icon } from './ui/icon'
 
 /** Capabilities and the two extra roles are read from the caller on every
@@ -46,9 +47,20 @@ export function HostScriptPanel({ capabilities, nodeShell }: {
         </p>
       )}
       {open && (
-        <Button type="button" variant="ghost" className="mt-2" onClick={generate}>
-          Generate setup script
-        </Button>
+        <ButtonGroup className="mt-2">
+          <Button type="button" size="sm" variant="ghost" onClick={generate}>
+            Generate script
+          </Button>
+          {script && (
+            <>
+              <ButtonGroupSeparator />
+              <Button type="button" size="sm" variant="ghost"
+                onClick={() => navigator.clipboard.writeText(script)}>
+                Copy script
+              </Button>
+            </>
+          )}
+        </ButtonGroup>
       )}
       {open && error && <p className="mt-2 text-[12.5px] text-red">{error}</p>}
       {open && script && (
@@ -66,8 +78,6 @@ export function HostScriptPanel({ capabilities, nodeShell }: {
               authorized_keys block in onboarding: this is shell text, and
               shell text that follows a light theme stops reading as shell. */}
           <pre className="mt-2 max-h-64 overflow-auto rounded-ctl bg-[#0a0e14] p-3 font-mono text-[11px] leading-[1.6] text-text-2">{script}</pre>
-          <Button type="button" variant="ghost" className="mt-2"
-            onClick={() => navigator.clipboard.writeText(script)}>Copy script</Button>
         </>
       )}
     </>
