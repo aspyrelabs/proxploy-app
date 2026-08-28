@@ -1,11 +1,10 @@
 /** UpdatePanel (frontend/src/routes/apps.tsx): the app-detail "Update to vX"
- *  flow. services/appstore.py::run_update reports the same three-step
- *  ctx.progress(10)/(80)/(100) run_install does. Location 1 of the
- *  determinate loading pass covers both, and this file is the update half. */
+ *  flow. run_update reports three checkpoints, which is not enough to draw a
+ *  rate from, so the panel spins rather than counting and says how the job
+ *  ended once it settles. */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
-import { FakeEventSource, installFakeEventSource } from './fakeEventSource'
 
 const { notifySuccess } = vi.hoisted(() => ({ notifySuccess: vi.fn() }))
 vi.mock('../lib/notify', () => ({ notify: { success: notifySuccess, error: vi.fn(), info: vi.fn(), warning: vi.fn() } }))
@@ -13,6 +12,8 @@ vi.mock('../lib/notify', () => ({ notify: { success: notifySuccess, error: vi.fn
 let updateJob: { id: number; kind: string; progress_pct: number | null } = {
   id: 21, kind: 'app.update', progress_pct: null,
 }
+// What GET /jobs/{id} answers while the panel watches the job it started.
+let jobStatus = 'running'
 
 vi.mock('../api/client', () => ({
   ApiError: class extends Error {},
@@ -31,6 +32,10 @@ vi.mock('../api/client', () => ({
       })
     }
     if (path === `/jobs/${updateJob.id}/events`) return Promise.resolve([])
+    if (path === `/jobs/${updateJob.id}`) {
+      return Promise.resolve({ id: updateJob.id, kind: 'app.update', status: jobStatus,
+                               progress_pct: null, error: null })
+    }
     return Promise.resolve(null)
   }),
 }))
@@ -52,28 +57,30 @@ const startUpdate = async () => {
 }
 
 describe('UpdatePanel', () => {
-  it('shows no ring until the update job reports progress, then reflects a live update', async () => {
+  it('spins without claiming a figure, and keeps the transcript one click away', async () => {
     updateJob = { id: 21, kind: 'app.update', progress_pct: null }
-    const restore = installFakeEventSource()
+    jobStatus = 'running'
     wrap()
     await startUpdate()
 
     await waitFor(() => expect(notifySuccess).toHaveBeenCalled())
-    expect(screen.queryByRole('status')).toBeNull()
-
-    FakeEventSource.last.emit('progress', { pct: 80 })
-    await waitFor(() => expect(screen.getByRole('status')).toHaveAttribute(
-      'aria-label', expect.stringContaining('80 percent')))
-
-    restore()
+    // Indeterminate: the ring names what it is waiting on and no percentage,
+    // because three checkpoints cannot say how far along anything is.
+    await waitFor(() => expect(screen.getByRole('status'))
+      .toHaveAttribute('aria-label', 'Updating Immich'))
+    expect(screen.getByRole('status').getAttribute('aria-label')).not.toMatch(/percent/)
+    expect(screen.getByText('Updating…')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Logs' })).toBeInTheDocument()
   })
 
-  it('seeds the ring from the job row instead of starting at zero', async () => {
-    updateJob = { id: 22, kind: 'app.update', progress_pct: 10 }
+  it('says how the update ended instead of spinning for ever', async () => {
+    updateJob = { id: 22, kind: 'app.update', progress_pct: null }
+    jobStatus = 'succeeded'
     wrap()
     await startUpdate()
 
-    await waitFor(() => expect(screen.getByRole('status')).toHaveAttribute(
-      'aria-label', expect.stringContaining('10 percent')))
+    await waitFor(() => expect(screen.getByText('Updated Immich.')).toBeInTheDocument())
+    expect(screen.queryByRole('status')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Logs' })).toBeInTheDocument()
   })
 })

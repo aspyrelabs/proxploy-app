@@ -161,18 +161,20 @@ describe('AppLogs', () => {
     await waitFor(() => expect(screen.getByText('app started')).toBeInTheDocument())
   })
 
-  it('shows an honest empty state instead of polling a dead endpoint forever', async () => {
-    // Regression test for finding #1: the backend has no CT log-tailing
-    // channel yet (GET /apps/{id}/logs answers 501), and the old `data ?? []`
-    // fallback silently swallowed that error into a permanently-empty panel
-    // while polling every 5s forever.
+  it('says what to check instead of polling a dead endpoint forever', async () => {
+    // The logs read over SSH into the container, so the ways this fails are a
+    // disconnected host and a stopped container. Whichever it is, the panel
+    // names them and stops asking rather than swallowing the error into a
+    // permanently empty box polled every 5s.
     const apiMock = vi.mocked((await import('../api/client')).api)
-    apiMock.mockRejectedValueOnce(new Error('501'))
+    apiMock.mockRejectedValueOnce(new Error('502'))
     const callsBefore = apiMock.mock.calls.length
     const { AppLogs } = await import('../routes/apps')
     const qc = new QueryClient()
     render(<QueryClientProvider client={qc}><AppLogs appId={42} /></QueryClientProvider>)
-    await waitFor(() => expect(screen.getByText(/not available/i)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(/not readable/i)).toBeInTheDocument())
+    expect(screen.getByText(/host is connected and the container is running/i))
+      .toBeInTheDocument()
     // Only the one call -- retry:false and the refetchInterval-on-error guard
     // both mean this must not still be polling.
     expect(apiMock.mock.calls.length - callsBefore).toBe(1)

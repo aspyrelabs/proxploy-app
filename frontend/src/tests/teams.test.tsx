@@ -174,19 +174,23 @@ describe('TeamsCard', () => {
     wrap()
     fireEvent.click(await screen.findByText('Ops', { exact: false }))
     const memberRow = (await screen.findByLabelText('role for v@x.io')).closest('tr')!
-    fireEvent.click(within(memberRow).getByRole('button', { name: 'Remove' }))
+    fireEvent.click(within(memberRow).getByRole('button', { name: /^Remove / }))
     expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('only team'))
     await new Promise((r) => setTimeout(r, 10))
     expect(calls.some((c) => c.method === 'DELETE')).toBe(false)
   })
 
-  it('surfaces the 409 "last owner" refusal from the backend rather than swallowing it', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
+  it('never offers to strip the last owner of their role or their membership', async () => {
+    // The backend refuses both (409), and did so before this guard existed.
+    // The controls now refuse first, because an install with no owner has
+    // nobody who can appoint one and no route in the product recovers from
+    // it. The request is never made rather than made and rejected.
     wrap()
     fireEvent.click(await screen.findByText('Default', { exact: false }))
     const memberRow = (await screen.findByLabelText('role for admin@example.com')).closest('tr')!
-    fireEvent.click(within(memberRow).getByRole('button', { name: 'Remove' }))
-    await waitFor(() => expect(notifyError).toHaveBeenCalledWith('cannot remove the last owner'))
+    expect(within(memberRow).getByRole('button', { name: /^Remove / })).toBeDisabled()
+    expect(within(memberRow).getByLabelText('role for admin@example.com')).toBeDisabled()
+    expect(notifyError).not.toHaveBeenCalled()
   })
 
   it('removing a member with other teams asks a plain confirmation, no lockout warning', async () => {
@@ -194,7 +198,7 @@ describe('TeamsCard', () => {
     wrap()
     fireEvent.click(await screen.findByText('Ops', { exact: false }))
     const memberRow = (await screen.findByLabelText('role for multi@x.io')).closest('tr')!
-    fireEvent.click(within(memberRow).getByRole('button', { name: 'Remove' }))
+    fireEvent.click(within(memberRow).getByRole('button', { name: /^Remove / }))
     expect(window.confirm).toHaveBeenCalledWith('Remove multi@x.io from Ops?')
     await waitFor(() => expect(calls.some((c) =>
       c.path === '/teams/2/members/4' && c.method === 'DELETE')).toBe(true))

@@ -77,14 +77,18 @@ describe('VmTable', () => {
     wrap([VM])
     const row = rowFor('win11')
     expect(within(row).getByText('win11')).toBeInTheDocument()
-    expect(within(row).getByText(/pve-a · VM 201/)).toBeInTheDocument()
+    // Two lines since the host cell truncates the fully qualified name and
+    // keeps the guest id under it.
+    expect(within(row).getByText('pve-a')).toBeInTheDocument()
+    expect(within(row).getByText(/VM 201/)).toBeInTheDocument()
     expect(within(row).getByText(/running/i)).toBeInTheDocument()
     // Pinned against the real formatters (frontend/src/lib/format.ts).
     // CPU is the raw percentage; RAM and Storage are used over allocated, so
     // both land on 50%; the storage cell also spells the bytes out.
     expect(within(row).getByText('12%')).toBeInTheDocument()
     expect(within(row).getAllByText('50%')).toHaveLength(2)
-    expect(within(row).getByText('50.0 GiB / 100.0 GiB')).toBeInTheDocument()
+    // One unit, not two: fmtBytesPair drops the repeated GiB.
+    expect(within(row).getByText('50.0 / 100.0 GiB')).toBeInTheDocument()
     // fmtBps multiplies by 8: 1250000 B/s = 10.0 Mbps, 125000 = 1.0 Mbps.
     // Down and up are their own elements now, stacked with a rule between, so
     // they are matched separately rather than as one run of text.

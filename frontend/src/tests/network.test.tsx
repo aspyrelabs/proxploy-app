@@ -202,7 +202,7 @@ describe('NetworkPage reads', () => {
     wrap()
     await screen.findByRole('table', { name: 'Guest attachments' })
     fireEvent.click(table('Guest attachments').getAllByRole('button', { name: 'Edit' })[0])
-    expect(await screen.findByText(/preserved exactly as Proxmox stores/i)).toBeInTheDocument()
+    expect(await screen.findByText(/kept exactly as they are/i)).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('Bridge'), { target: { value: 'vmbr1' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save NIC' }))
     await waitFor(() => expect(calls.length).toBe(1))

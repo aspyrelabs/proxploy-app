@@ -109,9 +109,7 @@ describe('HostForm capability tokens', () => {
     expect(screen.queryByLabelText('API token id')).not.toBeInTheDocument()
     expect(screen.queryByLabelText('API token secret')).not.toBeInTheDocument()
 
-    // .p-3, not .rounded-ctl: Button itself carries rounded-ctl, so that
-    // selector matches the button before it reaches the surrounding box.
-    const box = screen.getByRole('button', { name: 'Generate setup script' }).closest('.p-3')
+    const box = screen.getByText('Tokens').closest('div')
     expect(box).not.toBeNull()
     const group = within(box as HTMLElement)
     expect(group.getByLabelText('Monitoring token id')).toBeInTheDocument()
@@ -121,9 +119,9 @@ describe('HostForm capability tokens', () => {
     expect(group.getByLabelText('Backup token id')).toBeInTheDocument()
   })
 
-  // Monitoring is mandatory, not another capability: it must render even
-  // with every optional capability unticked, and stay a plain field, never a
-  // checkbox.
+  // Monitoring is mandatory: its token fields must render even with every
+  // optional capability unticked, and its row checkbox stays checked and
+  // disabled, never an actual choice.
   it('always shows the monitoring token fields, even with every capability unticked', () => {
     withQuery(<HostForm onCreated={() => {}} />)
     for (const label of ['Lifecycle', 'Console', 'Backup']) {
@@ -131,7 +129,9 @@ describe('HostForm capability tokens', () => {
     }
     expect(screen.getByLabelText('Monitoring token id')).toBeInTheDocument()
     expect(screen.getByLabelText('Monitoring token secret')).toBeInTheDocument()
-    expect(screen.queryByRole('checkbox', { name: /monitoring/i })).not.toBeInTheDocument()
+    const monitoring = screen.getByRole('checkbox', { name: /^Monitoring$/ })
+    expect(monitoring).toBeChecked()
+    expect(monitoring).toBeDisabled()
   })
 
   it('creates the host, then stores one capability token per filled pair', async () => {
@@ -309,10 +309,12 @@ describe('HostForm capability consequence text', () => {
     expect(screen.queryByText((t) => t.includes(why('lifecycle')))).not.toBeInTheDocument()
   })
 
-  it('never renders monitoring as a checkbox and never shows its consequence text', async () => {
+  it('renders monitoring as a checked, disabled checkbox and never shows its consequence text', async () => {
     withQuery(<HostForm onCreated={() => {}} />)
     await untick('Lifecycle')  // wait for the catalog so `why` text is possible at all
-    expect(screen.queryByRole('checkbox', { name: /monitoring/i })).not.toBeInTheDocument()
+    const monitoring = screen.getByRole('checkbox', { name: /^Monitoring$/ })
+    expect(monitoring).toBeChecked()
+    expect(monitoring).toBeDisabled()
     expect(screen.queryByText((t) => t.includes(why('monitoring')))).not.toBeInTheDocument()
   })
 

@@ -174,7 +174,7 @@ function RunDialog({ onClose }: { onClose: () => void }) {
                            onChange={setOnly} idPrefix="bk-run" />
             </div>
             <label className="mt-4 block text-[11px] uppercase tracking-wide text-text-3"
-                   htmlFor="bk-store">Archive lands on</label>
+                   htmlFor="bk-store">Target</label>
             <select id="bk-store" className={inputCls} value={target}
                     onChange={(e) => setStore(e.target.value)}>
               {stores.map((s) => (

@@ -76,8 +76,16 @@ const saveBtn = () => screen.getByRole('button', { name: 'Save changes' })
 
 /** The dialog is a rail plus one pane, so a control only exists once its
  *  section is showing. Every test that reaches past General opens it first. */
-const go = (section: string) =>
+// Hardware, Startup and Misc live under Advanced and only exist in the rail
+// once it is open, so reaching one means opening the parent first.
+const ADVANCED_CHILDREN = ['Hardware', 'Startup', 'Misc']
+const go = (section: string) => {
+  if (ADVANCED_CHILDREN.includes(section)
+      && !screen.queryByRole('button', { name: new RegExp(`^${section}$`) })) {
+    fireEvent.click(screen.getByRole('button', { name: /^Advanced$/ }))
+  }
   fireEvent.click(screen.getByRole('button', { name: new RegExp(`^${section}`) }))
+}
 
 describe('VmOptionsDialog', () => {
   it('renders every group', async () => {
@@ -93,6 +101,8 @@ describe('VmOptionsDialog', () => {
     go('Guest OS'); expect(screen.getByLabelText('OS type')).toBeInTheDocument()
     go('Boot'); expect(screen.getByLabelText('Saved state storage')).toBeInTheDocument()
     go('Advanced'); expect(screen.getByLabelText('ACPI support')).toBeInTheDocument()
+    go('Startup'); expect(screen.getByLabelText('Freeze the CPU at startup')).toBeInTheDocument()
+    go('Misc'); expect(screen.getByText('SMBIOS identity')).toBeInTheDocument()
   })
 
   it('sends nothing for a switch nobody touched', async () => {
@@ -145,7 +155,7 @@ describe('VmOptionsDialog', () => {
     // One pane is mounted at a time, so the eight are collected by walking the
     // rail rather than read off a single render.
     const marked: string[] = []
-    for (const sec of ['General', 'Guest OS', 'Boot', 'Advanced']) {
+    for (const sec of ['General', 'Guest OS', 'Boot', 'Advanced', 'Startup', 'Misc']) {
       go(sec)
       marked.push(...[...document.body.querySelectorAll('[data-next-boot]')]
         .map((el) => el.getAttribute('data-next-boot') as string))
@@ -178,7 +188,7 @@ describe('VmOptionsDialog', () => {
     options = payload()
     wrap()
     await ready()
-    go('Advanced')
+    go('Misc')
     for (const label of ['SPICE enhancements', 'AMD SEV memory encryption',
                          'Intel TDX trusted domains']) {
       expect(screen.getByLabelText(label)).toBeDisabled()
@@ -239,15 +249,17 @@ describe('VmOptionsDialog', () => {
 })
 
 describe('the Advanced section', () => {
-  it('groups its rows under headings rather than one long list', async () => {
+  it('splits its rows into groups rather than one long list', async () => {
     // Seven unrelated rows in a column, from hot-plug to SMBIOS identity, with
-    // nothing saying which belong together.
+    // nothing saying which belong together. Advanced is a heading with three
+    // children now, and selecting it opens the first of them.
     options = payload()
     wrap()
     await ready()
     go('Advanced')
-    expect(screen.getByText('Hardware')).toBeInTheDocument()
-    expect(screen.getByText('Startup and identity')).toBeInTheDocument()
+    for (const group of ['Hardware', 'Startup', 'Misc']) {
+      expect(screen.getByRole('button', { name: group })).toBeInTheDocument()
+    }
   })
 
   it('puts each row under the heading it belongs to', async () => {
@@ -255,24 +267,26 @@ describe('the Advanced section', () => {
     wrap()
     await ready()
     go('Advanced')
-    const hardware = screen.getByText('Hardware').closest('div')!
-    const startup = screen.getByText('Startup and identity').closest('div')!
-    expect(within(hardware).getByLabelText('ACPI support')).toBeInTheDocument()
-    expect(within(hardware).getByLabelText('Hardware virtualisation')).toBeInTheDocument()
-    expect(within(startup).getByLabelText('Freeze the CPU at startup')).toBeInTheDocument()
-    expect(within(startup).getByLabelText('Clock start date')).toBeInTheDocument()
+    expect(screen.getByLabelText('ACPI support')).toBeInTheDocument()
+    expect(screen.getByLabelText('Hardware virtualisation')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Freeze the CPU at startup')).toBeNull()
+    go('Startup')
+    expect(screen.getByLabelText('Freeze the CPU at startup')).toBeInTheDocument()
+    expect(screen.queryByLabelText('ACPI support')).toBeNull()
+    expect(screen.getByLabelText('Clock start date')).toBeInTheDocument()
   })
 
   it('keeps the Proxmox-only group last and separate', async () => {
     options = payload()
     wrap()
     await ready()
-    go('Advanced')
-    const headings = screen.getAllByText(
-      /^(Hardware|Startup and identity|Set by Proxmox only)$/)
-      .map((el) => el.textContent)
-    expect(headings[0]).toBe('Hardware')
-    expect(headings[1]).toBe('Startup and identity')
+    go('Misc')
+    // The rail carries the grouping now; what this still has to prove is that
+    // the settings only Proxmox may change stay behind their own heading,
+    // below the ones the operator can.
+    expect(screen.getByText('Set by Proxmox only')).toBeInTheDocument()
+    const body = document.body.textContent ?? ''
+    expect(body.indexOf('SMBIOS identity')).toBeLessThan(body.indexOf('Set by Proxmox only'))
   })
 
   it('stacks the hot-plug switches one per line', async () => {

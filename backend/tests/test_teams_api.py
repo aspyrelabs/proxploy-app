@@ -9,14 +9,14 @@ from proxploy.models import AuditEvent, Host, Team, TeamMember, User
 from tests.support import make_app
 
 
-def _mk_user(client, csrf_header, email, role, password="correct-horse-battery"):
+def _mk_user(client, csrf_header, email, role, password="Correct-Horse-Battery-9"):
     r = client.post("/api/v1/users", json={"email": email, "password": password,
                                            "role": role}, headers=csrf_header(client))
     assert r.status_code == 201, r.text
     return r.json()
 
 
-def _login(client, csrf_header, email, password="correct-horse-battery"):
+def _login(client, csrf_header, email, password="Correct-Horse-Battery-9"):
     r = client.post("/api/v1/auth/login", json={"email": email, "password": password},
                     headers=csrf_header(client))
     assert r.status_code == 200, r.text
@@ -71,7 +71,8 @@ def test_member_upsert_immediately_changes_enforcement(app_client, csrf_header):
                        json={"role": "admin"}, headers=csrf_header(app_client))
     assert r.status_code == 200, r.text
     assert r.json() == {"user_id": v["id"], "email": "v@x.io",
-                        "display_name": None, "role": "admin"}
+                        "display_name": None, "last_login_at": None,
+                        "role": "admin"}
 
     _logout(app_client, csrf_header)
     _login(app_client, csrf_header, "v@x.io")

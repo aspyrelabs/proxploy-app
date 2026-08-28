@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, field_validator
 
 from proxploy.api.deps import ROLE_ORDER, authorize, get_db, require_entitlement
-from proxploy.models import Host, Team, TeamMember, User
+from proxploy.models import Host, Team, TeamMember, User, to_iso
 from proxploy.services.audit import write_audit
 from proxploy.services.authz import build_enforcer, sync_user
 
@@ -66,7 +66,7 @@ def _team_out(db, t: Team) -> dict:
 
 def _member_out(u: User, role: str) -> dict:
     return {"user_id": u.id, "email": u.email, "display_name": u.display_name,
-            "role": role}
+            "last_login_at": to_iso(u.last_login_at), "role": role}
 
 
 @router.get("", dependencies=[Depends(_read), Depends(_ENT)])
@@ -162,6 +162,16 @@ def set_member(team_id: int, user_id: int, body: MemberIn, request: Request,
         m = TeamMember(team_id=team_id, user_id=user_id, role=body.role)
         db.add(m)
     else:
+        # The same lockout the remove path refuses, reached the other way: an
+        # owner who demotes themselves leaves the install with nobody who can
+        # promote anyone back, and no route in the product recovers from it.
+        # Scoped to the default team for the same reason removal is; another
+        # team losing its last owner is the deauthorization mechanism.
+        if t.slug == "default" and m.role == "owner" and body.role != "owner":
+            owners = db.query(TeamMember).filter_by(team_id=team_id, role="owner").count()
+            if owners <= 1:
+                raise HTTPException(409, "cannot change the last owner's role; "
+                                         "make someone else an owner first")
         m.role = body.role
     db.commit()
     sync_user(request.app.state.authz, db, user_id)

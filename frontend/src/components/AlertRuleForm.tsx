@@ -4,7 +4,6 @@ import { api, apiErrorDetail } from '../api/client'
 import { useAlertMetrics } from '../api/alerts'
 import { notify } from '../lib/notify'
 import type { AppRow, VmRow } from '../api/hooks'
-import { Button } from './ui/button'
 import { Skeleton, SkeletonField, SkeletonGroup } from './ui/skeleton'
 
 const input = 'w-full rounded-ctl border border-line bg-panel-2 px-3 py-2 text-[13px] text-text'
@@ -107,8 +106,10 @@ export function AlertRuleForm({ onSaved }: { onSaved: () => void }) {
   }
 
   return (
-    <form className="grid grid-cols-1 gap-3 sm:grid-cols-2"
+    <form id="ar-form" className="mt-4 space-y-3"
           onSubmit={(e) => { e.preventDefault(); create.mutate() }}>
+      <div className="grid grid-cols-1 gap-3 rounded-card border border-line-soft
+                      bg-panel-2 p-4 sm:grid-cols-2">
       <div className="sm:col-span-2">
         <label className={label} htmlFor="ar-name">Name</label>
         <input id="ar-name" className={input} value={name} required
@@ -221,11 +222,14 @@ export function AlertRuleForm({ onSaved }: { onSaved: () => void }) {
         </select>
       </div>
 
-      <div className="sm:col-span-2">
-        <Button type="submit" disabled={create.isPending}>Create rule</Button>
-        <span className="ml-3 text-[12px] text-text-3">
-          Notifications go to every channel subscribed to <code>alert.fired</code>.
-        </span>
+      </div>
+
+      <div className="rounded-ctl border border-line-soft bg-elev p-3">
+        <p className="text-[12px] text-text-2">
+          A rule that fires notifies every channel subscribed to{' '}
+          <code className="font-mono">alert.fired</code>. With no channel subscribed
+          it still shows on the Alerts page and nowhere else.
+        </p>
       </div>
     </form>
   )

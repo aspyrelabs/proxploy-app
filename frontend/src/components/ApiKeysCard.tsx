@@ -1,3 +1,4 @@
+import { ButtonGroup, ButtonGroupSeparator } from './ui/button-group'
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { api, apiErrorDetail } from '../api/client'
@@ -39,6 +40,11 @@ const RESOURCE_ACTIONS: Record<string, string[]> = {
 }
 const SCOPE_RESOURCES = Object.keys(RESOURCE_ACTIONS)
 
+// Every resource's write scope plus read: the widest a key can be asked for.
+// The per-action boxes are implied by their resource's write scope, which is
+// why they are not listed here and why the UI disables them when it is on.
+const ALL_SCOPES = ['read', ...SCOPE_RESOURCES.map((r) => `${r}:write`)]
+
 export function ApiKeysCard() {
   const ent = useEntitlements()
   // Same wait-for-first-fetch pattern as TeamsCard/SchedulesCard: fetching
@@ -51,6 +57,7 @@ export function ApiKeysCard() {
   const [adding, setAdding] = useState(false)
   const [name, setName] = useState('')
   const [scopes, setScopes] = useState<Set<string>>(new Set())
+  const allScopesOn = ALL_SCOPES.every((s) => scopes.has(s))
   const [expiresAt, setExpiresAt] = useState('')
   // The raw key from the most recent creation, held ONLY in this component's
   // state -- never written to localStorage/sessionStorage, never refetched
@@ -220,6 +227,22 @@ export function ApiKeysCard() {
                 <legend className="mb-1 block text-[10.5px] uppercase tracking-wide text-text-3">
                   Scopes (empty = full rights of your role, a key can only narrow that, never widen it)
                 </legend>
+                <div className="mb-2 flex flex-wrap items-center gap-2">
+                  <ButtonGroup>
+                    <Button type="button" size="sm" variant="ghost"
+                      disabled={allScopesOn}
+                      onClick={() => setScopes(new Set(ALL_SCOPES))}>Select all</Button>
+                    <ButtonGroupSeparator />
+                    <Button type="button" size="sm" variant="ghost"
+                      disabled={scopes.size === 0}
+                      onClick={() => setScopes(new Set())}>Clear</Button>
+                  </ButtonGroup>
+                  <span className="text-[11.5px] text-text-3">
+                    Selecting every scope is not the same as leaving them empty: an empty
+                    key follows your role as it changes, this one is fixed to what is
+                    ticked now.
+                  </span>
+                </div>
                 <label className="mb-2 inline-flex items-center gap-1 text-[12px] text-text-2">
                   <input type="checkbox" checked={scopes.has('read')} onChange={() => toggleScope('read')} />
                   read

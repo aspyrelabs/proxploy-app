@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import { api } from '../api/client'
 import type { VmRow } from '../api/hooks'
 import { errBody } from '../api/network'
@@ -357,9 +357,12 @@ function OptionRow({ label, htmlFor, hint, warn, changed, effect, control, child
         </div>
         {warn && <p className="mt-1 text-[11.5px] text-text-3">{warn}</p>}
         {effect}
-        {children && <div className="mt-2">{children}</div>}
       </div>
       {control && <div className="shrink-0 pt-0.5">{control}</div>}
+      {/* Full width, under both columns: a nested switch has to line up with
+          the one in `control` above it, and it cannot while it is boxed into
+          the label's column. */}
+      {children && <div className="col-span-2 mt-2">{children}</div>}
     </div>
   )
 }
@@ -367,18 +370,26 @@ function OptionRow({ label, htmlFor, hint, warn, changed, effect, control, child
 
 /** The rail, and which settings live behind each entry. The map is also what
  *  lets a section show how many unsaved changes it is hiding. */
-const SECTIONS: { id: string; label: string }[] = [
+const SECTIONS: { id: string; label: string; children?: { id: string; label: string }[] }[] = [
   { id: 'general', label: 'General' },
   { id: 'os', label: 'Guest OS' },
   { id: 'boot', label: 'Boot' },
-  { id: 'advanced', label: 'Advanced' },
+  // Advanced holds three groups rather than one long list. It is a heading
+  // with children, never a panel of its own: selecting it opens the first.
+  { id: 'advanced', label: 'Advanced', children: [
+    { id: 'hardware', label: 'Hardware' },
+    { id: 'startup', label: 'Startup' },
+    { id: 'misc', label: 'Misc' },
+  ] },
 ]
 
 const SECTION_KEYS: Record<string, string[]> = {
   general: ['name', 'onboot', 'startup', 'protection'],
   os: ['ostype', 'agent', 'localtime'],
   boot: ['boot', 'vmstatestorage'],
-  advanced: ['hotplug', 'tablet', 'acpi', 'kvm', 'freeze', 'startdate', 'smbios1'],
+  hardware: ['hotplug', 'tablet', 'acpi', 'kvm'],
+  startup: ['freeze', 'startdate'],
+  misc: ['smbios1'],
 }
 
 const STARTUP_FIELDS: [string, string][] = [
@@ -513,19 +524,43 @@ function OptionsForm({ vm, data, onClose }: {
         <nav aria-label="Option sections"
           className="flex gap-1 overflow-x-auto sm:flex-col sm:overflow-visible">
           {SECTIONS.map((s) => {
-            const n = sectionChanges(s.id)
-            const on = s.id === section
+            const kids = s.children ?? []
+            const openHere = kids.some((k) => k.id === section)
+            const n = kids.length
+              ? kids.reduce((t, k) => t + sectionChanges(k.id), 0)
+              : sectionChanges(s.id)
+            const on = kids.length ? openHere : s.id === section
             return (
-              <button key={s.id} type="button" onClick={() => setSection(s.id)}
-                aria-current={on ? 'true' : undefined}
-                className={`flex shrink-0 items-center justify-between gap-2 rounded-ctl
-                            px-3 py-1.5 text-left text-[13px] ${segment(on)}`}>
-                {s.label}
-                {n > 0 && (
-                  <span className="rounded-full bg-amber-dim px-1.5 font-mono
-                                   text-[10px] text-amber">{n}</span>
-                )}
-              </button>
+              <Fragment key={s.id}>
+                <button type="button"
+                  onClick={() => setSection(kids.length ? kids[0].id : s.id)}
+                  aria-current={on && !kids.length ? 'true' : undefined}
+                  aria-expanded={kids.length ? openHere : undefined}
+                  className={`flex shrink-0 items-center justify-between gap-2 rounded-ctl
+                              px-3 py-1.5 text-left text-[13px] ${segment(on)}`}>
+                  {s.label}
+                  {n > 0 && (
+                    <span className="rounded-full bg-amber-dim px-1.5 font-mono
+                                     text-[10px] text-amber">{n}</span>
+                  )}
+                </button>
+                {openHere && kids.map((k) => {
+                  const kn = sectionChanges(k.id)
+                  return (
+                    <button key={k.id} type="button" onClick={() => setSection(k.id)}
+                      aria-current={k.id === section ? 'true' : undefined}
+                      className={`flex shrink-0 items-center justify-between gap-2 rounded-ctl
+                                  py-1.5 pe-3 ps-6 text-left text-[12.5px]
+                                  ${segment(k.id === section)}`}>
+                      {k.label}
+                      {kn > 0 && (
+                        <span className="rounded-full bg-amber-dim px-1.5 font-mono
+                                         text-[10px] text-amber">{kn}</span>
+                      )}
+                    </button>
+                  )
+                })}
+              </Fragment>
             )
           })}
         </nav>
@@ -600,14 +635,14 @@ function OptionsForm({ vm, data, onClose }: {
                         <option value="isa">isa</option>
                       </select>
                     </div>
-                    <div className="flex items-end gap-2 pb-1">
+                    <div className="flex items-end justify-end gap-2 pb-1">
+                      <label htmlFor="vmopt-agent-fstrim" className="text-[12.5px] text-text-2">
+                        Trim disks after a clone or migration
+                      </label>
                       <Switch id="vmopt-agent-fstrim"
                         checked={form.agent.fstrim_cloned_disks === '1'}
                         onCheckedChange={(v) =>
                           setProp('agent', 'fstrim_cloned_disks', v ? '1' : '')} />
-                      <label htmlFor="vmopt-agent-fstrim" className="text-[12.5px] text-text-2">
-                        Trim disks after a clone or migration
-                      </label>
                     </div>
                   </div>
                 )}
@@ -685,20 +720,19 @@ function OptionsForm({ vm, data, onClose }: {
             </>
           )}
 
-          {section === 'advanced' && (
+          {section === 'hardware' && (
             <>
               <div>
-              <SubHeading>Hardware</SubHeading>
               <OptionRow label="Hotplug" changed={changed('hotplug')}
                 hint="Which kinds of hardware can be added or removed while the VM is running. Changing CPU or memory hotplug only lands at the next boot."
                 effect={<Effect optionKey="hotplug" running={running} pending={pending} />}>
                 <div className="flex flex-col gap-2">
                   {HOTPLUG_FLAGS.map(([f, l]) => (
                     <label key={f} htmlFor={`vmopt-hotplug-${f}`}
-                      className="flex items-center gap-2 text-[12.5px] text-text-2">
+                      className="flex items-center justify-between gap-2 text-[12.5px] text-text-2">
+                      {l}
                       <Switch id={`vmopt-hotplug-${f}`} checked={hot.has(f)}
                         onCheckedChange={(v) => setHot(f, v)} />
-                      {l}
                     </label>
                   ))}
                 </div>
@@ -725,9 +759,12 @@ function OptionsForm({ vm, data, onClose }: {
                   onCheckedChange={(v) => setBool('kvm', v)} />} />
 
               </div>
+            </>
+          )}
 
+          {section === 'startup' && (
+            <>
               <div>
-              <SubHeading>Startup and identity</SubHeading>
               <OptionRow label="Freeze the CPU at startup" htmlFor="vmopt-freeze"
                 changed={changed('freeze')}
                 hint="The VM starts paused, waiting for you to resume it from the console. For debugging a boot problem."
@@ -743,6 +780,13 @@ function OptionsForm({ vm, data, onClose }: {
                   placeholder="now" onChange={(e) => set('startdate', e.target.value)} />
               </OptionRow>
 
+              </div>
+            </>
+          )}
+
+          {section === 'misc' && (
+            <>
+              <div>
               <OptionRow label="SMBIOS identity" changed={changed('smbios1')}
                 hint="The made-up hardware identity the guest reads. Some licensed software keys off it. Clear every box to go back to the Proxmox default."
                 effect={<Effect optionKey="smbios1" running={running} pending={pending} />}>

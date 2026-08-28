@@ -7,6 +7,8 @@ import { notify } from '../lib/notify'
 import { useAckAlert, useAlertHistory, useAlertMetrics, useAlertRules, useFiringAlerts } from '../api/alerts'
 import type { AlertRow, AlertRuleRow } from '../api/alerts'
 import { useEntitlements } from '../api/hooks'
+import { Dialog } from '../components/ui/dialog'
+import { Icon } from '../components/ui/icon'
 import { AlertRuleForm } from '../components/AlertRuleForm'
 import { QueryState } from '../components/QueryState'
 import { SkeletonGroup, SkeletonTable } from '../components/ui/skeleton'
@@ -159,9 +161,7 @@ export function AlertsPage() {
         <div className="mb-4 flex items-center justify-between">
           <h2 className="font-display text-[15px] font-semibold">Rules</h2>
           {rulesAllowed && (
-            <Button variant="ghost" onClick={() => setAdding((a) => !a)}>
-              {adding ? 'Close' : 'New rule'}
-            </Button>
+            <Button variant="ghost" onClick={() => setAdding(true)}>New rule</Button>
           )}
         </div>
         {ent.data != null && !rulesAllowed && (
@@ -225,9 +225,26 @@ export function AlertsPage() {
               )}
             </QueryState>
             {adding && (
-              <div className="mt-4 border-t border-line-soft pt-4">
+              <Dialog width={672} scrollBody onClose={() => setAdding(false)}
+                title={
+                  <span className="flex min-w-0 items-center gap-2.5">
+                    <span className="grid size-8 shrink-0 place-items-center rounded-tile
+                                     border border-line bg-panel-2 text-amber">
+                      <Icon name="notifications" size={18} />
+                    </span>
+                    <span className="flex min-w-0 flex-col leading-tight">
+                      <span className="truncate">New rule</span>
+                      <span className="truncate font-mono text-[11px] font-normal text-text-3">
+                        alert · fires on a metric
+                      </span>
+                    </span>
+                  </span>}>
                 <AlertRuleForm onSaved={() => setAdding(false)} />
-              </div>
+                <div className="mt-4 flex justify-end gap-2">
+                  <Button variant="ghost" onClick={() => setAdding(false)}>Cancel</Button>
+                  <Button type="submit" form="ar-form" variant="primary">Create rule</Button>
+                </div>
+              </Dialog>
             )}
           </>
         )}

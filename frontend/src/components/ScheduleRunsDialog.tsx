@@ -32,7 +32,7 @@ function details(run: JobRow): [string, string][] {
   if (took) out.push(['Took', took])
 
   const storage = str(p.storage)
-  out.push(['Archive lands on', storage ?? 'whichever backup storage Proxmox picks'])
+  out.push(['Target', storage ?? 'whichever backup storage Proxmox picks'])
   out.push(['What it backs up', vmids.length
     ? vmids.map(String).join(', ')
     : 'every container and virtual machine on the node'])

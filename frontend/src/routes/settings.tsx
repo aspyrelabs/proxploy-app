@@ -1,3 +1,5 @@
+import { Icon } from '../components/ui/icon'
+import { Dialog } from '../components/ui/dialog'
 import { Fragment, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Link, createRoute, useSearch } from '@tanstack/react-router'
@@ -319,13 +321,28 @@ export function SchedulesCard({ only, exclude, title = 'Schedules', canAdd = tru
         }}
       </QueryState>
       {adding && (
-        <div className="mt-4 border-t border-line-soft pt-4">
-          <ScheduleForm key="new"
-                        jobKind={only?.length === 1 ? only[0] : undefined}
-                        exclude={exclude}
-                        onSaved={() => { setAdding(false); setEditing(null) }}
-                        onCancel={() => setAdding(false)} />
-        </div>
+        <Dialog width={672} scrollBody onClose={() => setAdding(false)}
+          title={
+            <span className="flex min-w-0 items-center gap-2.5">
+              <span className="grid size-8 shrink-0 place-items-center rounded-tile
+                               border border-line bg-panel-2 text-amber">
+                <Icon name="schedule" size={18} />
+              </span>
+              <span className="flex min-w-0 flex-col leading-tight">
+                <span className="truncate">New job</span>
+                <span className="truncate font-mono text-[11px] font-normal text-text-3">
+                  {title.toLowerCase()} · runs on a schedule
+                </span>
+              </span>
+            </span>}>
+          <div className="mt-4">
+            <ScheduleForm key="new"
+                          jobKind={only?.length === 1 ? only[0] : undefined}
+                          exclude={exclude}
+                          onSaved={() => { setAdding(false); setEditing(null) }}
+                          onCancel={() => setAdding(false)} />
+          </div>
+        </Dialog>
       )}
     </Card>
   )
@@ -588,7 +605,8 @@ export function SettingsPage() {
                               const v = e.target.value
                               assignTeam.mutate({ host: h, teamId: v ? Number(v) : null })
                             }}
-                            className="rounded-ctl border border-line bg-panel px-2 py-1 text-[11.5px] text-text">
+                            className="w-full min-w-[8.5rem] rounded-ctl border border-line
+                                       bg-panel px-2 py-1 text-[11.5px] text-text">
                             {teams.isLoading
                               ? <option value="">Loading teams…</option>
                               : <option value="">Unassigned</option>}
@@ -654,9 +672,9 @@ export function SettingsPage() {
           on the invalidation refetches the mutations below trigger. */}
       <CardLoadingOverlay state={{ firstLoad: ent.isPending || (channelsAllowed && channels.isPending) }}>
       <Card title="Channels"
-            action={channelsAllowed && <Button variant="ghost" onClick={() => setAddingChannel(a => !a)}>
-              {addingChannel ? 'Close' : 'Add channel'}
-            </Button>}>
+            action={channelsAllowed && (
+              <Button variant="ghost" onClick={() => setAddingChannel(true)}>Add channel</Button>
+            )}>
         {ent.data != null && !channelsAllowed && (
           <p className="text-[12.5px] text-text-3">Not included in your plan.</p>
         )}
@@ -729,12 +747,29 @@ export function SettingsPage() {
                 </table>
               )}
             </QueryState>
-            {addingChannel && <div className="mt-4 border-t border-line-soft pt-4">
-              <ChannelForm onSaved={() => {
-                setAddingChannel(false)
-                qc.invalidateQueries({ queryKey: ['notifications', 'channels'] })
-              }} />
-            </div>}
+            {addingChannel && (
+              <Dialog width={672} scrollBody onClose={() => setAddingChannel(false)}
+                title={
+                  <span className="flex min-w-0 items-center gap-2.5">
+                    <span className="grid size-8 shrink-0 place-items-center rounded-tile
+                                     border border-line bg-panel-2 text-amber">
+                      <Icon name="notifications" size={18} />
+                    </span>
+                    <span className="flex min-w-0 flex-col leading-tight">
+                      <span className="truncate">Add channel</span>
+                      <span className="truncate font-mono text-[11px] font-normal text-text-3">
+                        notifications · where alerts go
+                      </span>
+                    </span>
+                  </span>}>
+                <div className="mt-4">
+                  <ChannelForm onSaved={() => {
+                    setAddingChannel(false)
+                    qc.invalidateQueries({ queryKey: ['notifications', 'channels'] })
+                  }} />
+                </div>
+              </Dialog>
+            )}
           </>
         )}
       </Card>

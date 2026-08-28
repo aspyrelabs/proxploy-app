@@ -1,3 +1,4 @@
+import { DEFAULT_PAGE_SIZE } from '../components/TablePager'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -131,8 +132,10 @@ describe('AuditPage pagination boundary', () => {
     await nextBtn()
     const call = (api as ReturnType<typeof vi.fn>).mock.calls
       .map((c) => String(c[0])).find((p) => p.startsWith('/audit'))!
-    // 51, not 50: the extra row is the whole mechanism.
-    expect(new URL(call, 'http://x').searchParams.get('per_page')).toBe('51')
+    // One past the page size, not the page size: the extra row is the whole
+    // mechanism. The default is DEFAULT_PAGE_SIZE, shared with the App Store.
+    expect(new URL(call, 'http://x').searchParams.get('per_page'))
+      .toBe(String(DEFAULT_PAGE_SIZE + 1))
   })
 
   it('disables Next on an exactly-full last page, the case the old heuristic got wrong', async () => {
@@ -140,19 +143,19 @@ describe('AuditPage pagination boundary', () => {
     // multiple and there is nothing after this page. The old check
     // (rows.length < AUDIT_PER_PAGE) left Next enabled here and walked the
     // user into an empty table.
-    await serve(50)
+    await serve(DEFAULT_PAGE_SIZE)
     wrap()
     expect((await nextBtn()) as HTMLButtonElement).toBeDisabled()
   })
 
   it('enables Next when the extra row shows another page exists', async () => {
-    await serve(51)
+    await serve(DEFAULT_PAGE_SIZE + 1)
     wrap()
     expect((await nextBtn()) as HTMLButtonElement).not.toBeDisabled()
   })
 
   it('disables Previous on page one, where there is nothing behind', async () => {
-    await serve(51)
+    await serve(DEFAULT_PAGE_SIZE + 1)
     wrap()
     expect((await prevBtn()) as HTMLButtonElement).toBeDisabled()
     // And it stays a real button, not a link: a link cannot be made inert.
@@ -160,7 +163,7 @@ describe('AuditPage pagination boundary', () => {
   })
 
   it('turns the page by refetching with the new page number', async () => {
-    await serve(51)
+    await serve(DEFAULT_PAGE_SIZE + 1)
     wrap()
     const { api } = await import('../api/client')
     fireEvent.click(await nextBtn())
@@ -224,11 +227,12 @@ describe('AuditPage pagination boundary', () => {
   })
 
   it('never renders the probe row', async () => {
-    await serve(51)
+    await serve(DEFAULT_PAGE_SIZE + 1)
     wrap()
     await nextBtn()
-    // 51 fetched, 50 rendered, plus the header row.
-    expect(screen.getAllByRole('row')).toHaveLength(51)
+    // One past the page size is fetched, a page's worth is rendered, plus the
+    // header row.
+    expect(screen.getAllByRole('row')).toHaveLength(DEFAULT_PAGE_SIZE + 1)
   })
 })
 

@@ -5,6 +5,7 @@ import { notify } from '../lib/notify'
 import { inputCls } from './LoginForm'
 import { Button } from './ui/button'
 import { Dialog } from './ui/dialog'
+import { Icon } from './ui/icon'
 
 // STAGED only: writes /etc/network/interfaces.new; live config is untouched
 // until Apply is pressed on the page behind this dialog.
@@ -49,16 +50,26 @@ export function BridgeForm({ hostId, node, iface, onClose }: {
   }
 
   const label = 'mb-1 block text-[11px] uppercase tracking-wide text-text-3'
+  const BOX = 'space-y-3 rounded-card border border-line-soft bg-panel-2 p-4'
 
   return (
-    <Dialog title={<>{editing ? `Edit ${name} on ${node}` : `New bridge on ${node}`}</>} width={460} onClose={onClose}>
-    <p className="mt-1 text-[12.5px] text-text-3">
-      Staged only. Proxmox writes this to{' '}
-      <span className="font-mono">/etc/network/interfaces.new</span>; {node} keeps its
-      current network until you apply it.
-    </p>
+    <Dialog width={560} onClose={onClose}
+      title={
+        <span className="flex min-w-0 items-center gap-2.5">
+          <span className="grid size-8 shrink-0 place-items-center rounded-tile
+                           border border-line bg-panel-2 text-amber">
+            <Icon name="lan" size={18} />
+          </span>
+          <span className="flex min-w-0 flex-col leading-tight">
+            <span className="truncate">{editing ? `Edit ${name}` : 'New bridge'}</span>
+            <span className="truncate font-mono text-[11px] font-normal text-text-3">
+              {node} · linux bridge
+            </span>
+          </span>
+        </span>}>
 
     <form onSubmit={submit} className="mt-4 space-y-3">
+      <div className={BOX}>
       <div>
         <label className={label} htmlFor="br-name">Interface</label>
         <input id="br-name" required disabled={editing} className={inputCls}
@@ -87,14 +98,25 @@ export function BridgeForm({ hostId, node, iface, onClose }: {
         <input id="br-comment" className={inputCls} placeholder="lab network"
                value={comments} onChange={(e) => setComments(e.target.value)} />
       </div>
-      <label className="flex items-center gap-2 text-[13px] text-text-2">
-        <input type="checkbox" checked={vlanAware}
-               onChange={(e) => setVlanAware(e.target.checked)} /> VLAN aware
-      </label>
-      <label className="flex items-center gap-2 text-[13px] text-text-2">
-        <input type="checkbox" checked={autostart}
-               onChange={(e) => setAutostart(e.target.checked)} /> Start on boot
-      </label>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+        <label className="flex items-center gap-2 text-[12.5px] text-text-2">
+          <input type="checkbox" checked={vlanAware}
+                 onChange={(e) => setVlanAware(e.target.checked)} /> VLAN aware
+        </label>
+        <label className="flex items-center gap-2 text-[12.5px] text-text-2">
+          <input type="checkbox" checked={autostart}
+                 onChange={(e) => setAutostart(e.target.checked)} /> Start on boot
+        </label>
+      </div>
+      </div>
+
+      <div className="rounded-ctl border border-line-soft bg-elev p-3">
+        <p className="text-[12px] text-text-2">
+          Staged only. Proxmox writes this to{' '}
+          <span className="font-mono">/etc/network/interfaces.new</span>, and {node} keeps
+          the network it has until you apply it.
+        </p>
+      </div>
       {error && <p className="text-[12.5px] text-red">{error}</p>}
       <div className="flex justify-end gap-2 pt-1">
         <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>

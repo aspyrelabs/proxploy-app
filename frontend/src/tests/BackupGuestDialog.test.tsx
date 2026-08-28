@@ -57,7 +57,7 @@ describe('BackupGuestDialog', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Start backup' })).toBeEnabled())
     // Only the store that carries `backup` content is on offer, same rule
     // RunDialog enforces host-wide.
-    const target = screen.getByLabelText(/archive lands on/i)
+    const target = screen.getByLabelText('Target')
     expect(target).toHaveValue('local')
     expect(screen.getByText(/CT 150/)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Start backup' }))

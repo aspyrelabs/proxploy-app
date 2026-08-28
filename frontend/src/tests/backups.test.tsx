@@ -213,11 +213,11 @@ describe('BackupsPage', () => {
     // the storage field were simply absent.
     await waitFor(() =>
       expect(screen.getByRole('status', { name: 'Checking what is on this host' })).toBeTruthy())
-    expect(screen.queryByLabelText(/archive lands on/i)).toBeNull()
+    expect(screen.queryByLabelText('Target')).toBeNull()
 
     open()
     expect(await screen.findByText(/All 2 on this host/)).toBeInTheDocument()
-    expect(screen.getByLabelText(/archive lands on/i)).toBeInTheDocument()
+    expect(screen.getByLabelText('Target')).toBeInTheDocument()
     expect(screen.queryByRole('status', { name: 'Checking what is on this host' })).toBeNull()
     appsGate = null
   })
@@ -333,7 +333,7 @@ describe('BackupsPage', () => {
     expect(screen.getByLabelText('win11 (VM 201)')).toBeChecked()
     expect(screen.getByText(/All 2 on this host/)).toBeInTheDocument()
     // Only the store that carries `backup` content is on offer.
-    const target = screen.getByLabelText(/archive lands on/i)
+    const target = screen.getByLabelText('Target')
     expect(within(target as HTMLElement).getByRole('option', { name: /local \(dir\)/ }))
       .toBeInTheDocument()
     expect(within(target as HTMLElement).queryByRole('option', { name: /local-lvm/ })).toBeNull()

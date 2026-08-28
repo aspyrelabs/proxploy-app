@@ -9,9 +9,13 @@ import { useStorageConfig } from '../api/storage'
 import { LockVeil } from './LockVeil'
 import { inputCls } from './LoginForm'
 import { Button } from './ui/button'
+import { Icon } from './ui/icon'
 import { Dialog } from './ui/dialog'
 
 type HostRow = { id: number; name: string }
+
+const BOX = 'space-y-3 rounded-card border border-line-soft bg-panel-2 p-4'
+const BAND = 'text-[11px] uppercase tracking-wide text-text-3'
 
 const TYPES = ['dir', 'nfs', 'cifs', 'pbs'] as const
 
@@ -151,7 +155,22 @@ export function StorageForm({ existing, onClose }:
   }
 
   return (
-    <Dialog title={<>{editing ? `Edit ${existing?.storage}` : 'Add storage'}</>} width={520} onClose={onClose}>
+    <Dialog width={672} onClose={onClose}
+      title={
+        <span className="flex min-w-0 items-center gap-2.5">
+          <span className="grid size-8 shrink-0 place-items-center rounded-tile
+                           border border-line bg-panel-2 text-amber">
+            <Icon name="database" size={18} />
+          </span>
+          <span className="flex min-w-0 flex-col leading-tight">
+            <span className="truncate">
+              {editing ? `Edit ${existing?.storage}` : 'Add storage'}
+            </span>
+            <span className="truncate font-mono text-[11px] font-normal text-text-3">
+              {type || 'datastore'} · {existing?.host_name ?? 'proxmox ve'}
+            </span>
+          </span>
+        </span>}>
 
     {/* Never hide a gated feature, veil it. The Close button sits OUTSIDE the
         veil: LockVeil sets pointer-events:none on its children, and a dialog
@@ -159,7 +178,8 @@ export function StorageForm({ existing, onClose }:
     <LockVeil locked={locked}
       title="Storage management is a Pro feature"
       subtitle="Attach, edit and detach datastores without leaving Proxploy.">
-      <form onSubmit={submit} className="space-y-3">
+      <form id="sf-form" onSubmit={submit} className="mt-4 space-y-3">
+        <div className={BOX}>
         {!editing && (
           <div>
             <label htmlFor="sf-host"
@@ -201,6 +221,11 @@ export function StorageForm({ existing, onClose }:
               <option value={type}>{type === '' ? 'unknown' : type}</option>}
           </select>
         </div>
+        </div>
+
+        {fields.length > 0 && (
+        <div className={BOX}>
+        <h3 className={BAND}>Connection</h3>
         {fields.map(([k, label, inputType, placeholder]) => (
           <div key={k}>
             <label htmlFor={`sf-${k}`}
@@ -210,13 +235,17 @@ export function StorageForm({ existing, onClose }:
               value={cfg[k] ?? ''} onChange={(e) => set(k, e.target.value)} />
           </div>
         ))}
-        <fieldset>
-          <legend className="mb-1 block text-[11px] uppercase tracking-wide text-text-3">
-            Content
-          </legend>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+        </div>
+        )}
+
+        {/* A group with a labelled heading, not fieldset/legend: a legend is
+            laid into the border box's own cut-out, so against a bordered card
+            it renders sitting on the line rather than inside it. */}
+        <div role="group" aria-labelledby="sf-content" className={BOX}>
+          <h3 id="sf-content" className={BAND}>Content</h3>
+          <div className="flex flex-wrap gap-x-4 gap-y-1.5">
             {contentOpts.map((c) => (
-              <label key={c} className="flex items-center gap-2 text-[13px]">
+              <label key={c} className="flex items-center gap-2 text-[12.5px] text-text-2">
                 <input type="checkbox" checked={ticked.has(c)}
                   onChange={() => toggleContent(c)} />
                 {/* An unknown key can only come from the datastore's own
@@ -225,22 +254,23 @@ export function StorageForm({ existing, onClose }:
               </label>
             ))}
           </div>
-        </fieldset>
-        <div className="flex items-center gap-2 pt-1">
-          <Button type="submit" variant="primary" disabled={busy || (!editing && !canAttach)}>
-            {editing ? 'Save' : 'Attach'}
-          </Button>
-          {editing && (
-            <Button type="button" variant="danger" disabled={busy} onClick={remove}>
-              Detach
-            </Button>
-          )}
         </div>
       </form>
     </LockVeil>
 
-    <div className="mt-4 flex justify-end">
+    {/* Outside the veil, like Close already was: LockVeil sets pointer-events
+        none on its children, and the only way out of a gated dialog must not
+        be behind the gate. Submit reaches the form by id instead. */}
+    <div className="mt-4 flex items-center justify-end gap-2">
+      {editing && (
+        <Button type="button" variant="danger" className="me-auto"
+          disabled={busy || locked} onClick={remove}>Detach</Button>
+      )}
       <Button variant="ghost" onClick={onClose}>Close</Button>
+      <Button type="submit" form="sf-form" variant="primary"
+        disabled={busy || locked || (!editing && !canAttach)}>
+        {editing ? 'Save' : 'Attach'}
+      </Button>
     </div>
     </Dialog>
   )

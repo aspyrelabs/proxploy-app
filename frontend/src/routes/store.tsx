@@ -1,3 +1,4 @@
+import { DEFAULT_PAGE_SIZE, PAGE_SIZES } from '../components/TablePager'
 import { useQuery } from '@tanstack/react-query'
 import { createRoute, useNavigate, useSearch } from '@tanstack/react-router'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -31,8 +32,7 @@ import { shellRoute } from './shell'
 // The page sizes offered, and the one a fresh visit gets. DEFAULT_PAGE_SIZE
 // is deliberately absent from the URL when it is in force (see the route's
 // validateSearch), so the common case keeps a clean /store link.
-const PAGE_SIZES = [15, 25, 50, 100] as const
-const DEFAULT_PAGE_SIZE = 25
+
 
 /** The popup's title, read off the list the grid already has rather than
  *  waiting on the detail fetch, so the dialog has a name the moment it opens

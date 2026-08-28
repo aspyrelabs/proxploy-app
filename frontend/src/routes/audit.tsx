@@ -1,8 +1,11 @@
+import { DEFAULT_PAGE_SIZE, PAGE_SIZES } from '../components/TablePager'
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue }
+  from '../components/ui/select'
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { createRoute } from '@tanstack/react-router'
 import { shellRoute } from './shell'
-import { AUDIT_PER_PAGE, CLEAR_PHRASE, auditExportUrl, clearAuditLog, useAuditLog } from '../api/audit'
+import { CLEAR_PHRASE, auditExportUrl, clearAuditLog, useAuditLog } from '../api/audit'
 import type { AuditFilters, AuditRow } from '../api/audit'
 import { ApiError, apiErrorDetail } from '../api/client'
 import { useEntitlements } from '../api/hooks'
@@ -59,7 +62,8 @@ export function AuditPage() {
 
   const [filters, setFilters] = useState<AuditFilters>({})
   const [page, setPage] = useState(1)
-  const audit = useAuditLog(filters, page, allowed)
+  const [perPage, setPerPage] = useState<number>(DEFAULT_PAGE_SIZE)
+  const audit = useAuditLog(filters, page, allowed, perPage)
   // GET /users needs ("user", "read"), which is the same admin floor as
   // ("audit", "read"), so anyone who can see this page can fill the select.
   const users = useUsers(allowed)
@@ -197,8 +201,8 @@ export function AuditPage() {
               // The hook asks for one row past the page so "is there more"
               // is a fact rather than an inference; that extra row is never
               // rendered.
-              const rows = fetched.slice(0, AUDIT_PER_PAGE)
-              const hasMore = fetched.length > AUDIT_PER_PAGE
+              const rows = fetched.slice(0, perPage)
+              const hasMore = fetched.length > perPage
               return (
               <>
                 <table className="w-full text-left text-[13px]">
@@ -248,7 +252,26 @@ export function AuditPage() {
                     ))}
                   </tbody>
                 </table>
-                <div className="mt-4 flex justify-end">
+                <div className="mt-4 flex flex-wrap items-center justify-between gap-4">
+                  <div role="group" className="flex w-fit items-center gap-2">
+                    <label htmlFor="audit-rows-per-page"
+                           className="select-none text-[12px] font-medium leading-snug text-text-2">
+                      Events per page
+                    </label>
+                    <Select value={String(perPage)}
+                            onValueChange={(v) => { setPerPage(Number(v)); setPage(1) }}>
+                      <SelectTrigger className="w-20" id="audit-rows-per-page" size="sm">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent align="start">
+                        <SelectGroup>
+                          {PAGE_SIZES.map((n) => (
+                            <SelectItem key={n} value={String(n)}>{n}</SelectItem>
+                          ))}
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                  </div>
                   <Pagination className="mx-0 w-auto">
                     <PaginationContent>
                       <PaginationItem>

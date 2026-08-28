@@ -252,7 +252,7 @@ export function ScheduleForm({ jobKind, existing, exclude, onSaved, onCancel }:
                          onChange={setOnly} idPrefix="sc-guest" />
           </div>
           <div className="sm:col-span-2">
-            <label className={label} htmlFor="sc-store">Archive lands on</label>
+            <label className={label} htmlFor="sc-store">Target</label>
             <select id="sc-store" className={input} value={target}
                     disabled={stores.length === 0}
                     onChange={(e) => setStore(e.target.value)}>

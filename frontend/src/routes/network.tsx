@@ -355,7 +355,13 @@ function HostNetworkSection({ nodes, pending }: { nodes: NodeIfaces[]; pending: 
                   </Button>
                 </ButtonGroup>
               </div>
-              <table aria-label={`Interfaces on ${n.node}`} className="w-full text-left text-[13px]">
+              {/* Fixed, with the same colgroup for every node: each node renders
+                  its own table, and on auto layout each one sized its columns
+                  to its own content, so node1's longer interface name pushed
+                  its Type, Subnet and State out of line with node2's. */}
+              <table aria-label={`Interfaces on ${n.node}`}
+                     className="w-full table-fixed text-left text-[13px]">
+                {IFACE_COL}
                 <thead>
                   <tr className="text-[11px] uppercase text-text-3">
                     <th scope="col" className={th}>Interface</th>
@@ -477,6 +483,17 @@ export function NetworkPage() {
 
 // shellRoute comes from ./shell, never ../router; importing router.tsx here
 // would force its eager createRouter() to run mid-cycle (cluster.tsx:273-277).
+const IFACE_COL = (
+  <colgroup>
+    <col className="w-[9rem]" />
+    <col className="w-[5rem]" />
+    <col />
+    <col className="w-[8rem]" />
+    <col className="w-[5rem]" />
+    <col className="w-[10.5rem]" />
+  </colgroup>
+)
+
 export const networkRoute = createRoute({
   getParentRoute: () => shellRoute,
   path: '/network',

@@ -358,7 +358,7 @@ describe('ScheduleForm, backup targets', () => {
     wrap(<ScheduleForm jobKind="backup.run" onSaved={() => {}} />)
     fireEvent.change(screen.getByLabelText(/name/i), { target: { value: 'Nightly' } })
     fireEvent.click(await screen.findByLabelText('win11 (VM 201)'))   // untick the VM
-    expect(screen.getByLabelText(/archive lands on/i)).toHaveValue('pbs-ds')
+    expect(screen.getByLabelText('Target')).toHaveValue('pbs-ds')
     fireEvent.click(screen.getByRole('button', { name: /create schedule/i }))
     await waitFor(() => expect(posted.length).toBe(1))
     // PVE vmids, not Proxploy row ids: params go straight to the job handler.

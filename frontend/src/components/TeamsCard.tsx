@@ -1,3 +1,4 @@
+import { Icon } from './ui/icon'
 import { Fragment, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { api, apiErrorDetail } from '../api/client'
@@ -10,7 +11,22 @@ import { Button } from './ui/button'
 import { CardLoadingOverlay } from './ui/card-loading-overlay'
 import { SkeletonGroup, SkeletonTable } from './ui/skeleton'
 
-const selectCls = 'rounded-ctl border border-line bg-panel px-2 py-1 text-[12px] text-text'
+/** Proxploy stores one display name, so first and last are read off it:
+ *  everything before the first space, and everything after. A user with no
+ *  display name shows neither rather than repeating their email twice. */
+function firstName(display: string | null): string {
+  return (display ?? '').trim().split(/\s+/)[0] ?? ''
+}
+
+function lastName(display: string | null): string {
+  const parts = (display ?? '').trim().split(/\s+/)
+  return parts.length > 1 ? parts.slice(1).join(' ') : ''
+}
+
+const LAST_OWNER = 'The only owner. Make someone else an owner first, or nobody '
+  + 'can manage this install.'
+
+const selectCls = 'min-w-[7rem] rounded-ctl border border-line bg-panel px-2 py-1 text-[12px] text-text'
 
 // teams.py's HTTPException details are plain strings ("cannot remove the
 // last owner", "team name already exists") -- main.py::problem_handler puts
@@ -67,31 +83,58 @@ function TeamMembers({ team, users, usersError, usersLoading, onRemove }: {
                   emptyNote=""
                   errorTitle="Members not readable"
                   errorNote="Proxploy could not reach the backend to list this team's members.">
-        {(rows) => (
+        {(rows) => {
+        // The install must keep somebody who can promote people. The backend
+        // refuses this too; the controls just stop offering a change they
+        // know will come back 409.
+        const lastOwner = (m: MemberRow) =>
+          team.slug === 'default' && m.role === 'owner'
+          && rows.filter((r) => r.role === 'owner').length <= 1
+        return (
           <table className="w-full text-left text-[12.5px]">
-            <thead><tr className="text-[10px] uppercase tracking-wide text-text-3">
-              <th className="pb-1">Email</th><th>Role</th><th /></tr></thead>
+            <thead><tr className="text-[10px] uppercase tracking-wide text-text-3
+                                  [&>th:not(:last-child)]:pe-4">
+              <th className="pb-2">First name</th>
+              <th className="pb-2">Last name</th>
+              <th className="pb-2">Email address</th>
+              <th className="pb-2">Last login</th>
+              <th className="pb-2">Role</th>
+              <th className="pb-2" />
+            </tr></thead>
             <tbody>
               {rows.map((m) => (
-                <tr key={m.user_id} className="border-t border-line-soft">
-                  <td className="py-1">{m.email}</td>
+                <tr key={m.user_id}
+                    className="border-t border-line-soft [&>td]:py-2.5
+                               [&>td:not(:last-child)]:pe-4">
+                  <td>{firstName(m.display_name)}</td>
+                  <td>{lastName(m.display_name)}</td>
+                  <td className="font-mono text-[11.5px]">{m.email}</td>
+                  <td className="font-mono text-[11.5px] text-text-3">
+                    {m.last_login_at ? new Date(m.last_login_at).toLocaleString() : 'never'}
+                  </td>
                   <td>
                     <select aria-label={`role for ${m.email}`} value={m.role}
-                      disabled={setRole.isPending}
+                      disabled={setRole.isPending || lastOwner(m)}
+                      title={lastOwner(m) ? LAST_OWNER : undefined}
                       onChange={(e) => setRole.mutate({ userId: m.user_id, role: e.target.value })}
                       className={selectCls}>
                       {ROLE_OPTIONS.map((r) => <option key={r} value={r}>{r}</option>)}
                     </select>
                   </td>
                   <td className="text-right">
-                    <Button variant="danger" size="sm"
-                      onClick={() => onRemove(team, m)}>Remove</Button>
+                    <Button variant="icon-danger" size="icon-xs"
+                      disabled={lastOwner(m)}
+                      title={lastOwner(m) ? LAST_OWNER : undefined}
+                      aria-label={`Remove ${m.email}`}
+                      onClick={() => onRemove(team, m)}>
+                      <Icon name="delete" size={16} />
+                    </Button>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
-        )}
+        )}}
       </QueryState>
       <div className="mt-3 flex items-end gap-2">
         <div>

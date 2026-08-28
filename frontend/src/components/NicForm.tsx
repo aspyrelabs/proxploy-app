@@ -6,6 +6,7 @@ import { notify } from '../lib/notify'
 import { inputCls } from './LoginForm'
 import { Button, amberLinkCls } from './ui/button'
 import { Dialog } from './ui/dialog'
+import { Icon } from './ui/icon'
 
 /**
  * Edit one guest NIC: bridge, VLAN tag, and whether Proxmox filters it.
@@ -67,19 +68,39 @@ export function NicForm({ nic, bridges, onClose }: {
   }
 
   const label = 'mb-1 block text-[11px] uppercase tracking-wide text-text-3'
+  const BOX = 'space-y-3 rounded-card border border-line-soft bg-panel-2 p-4'
 
   return (
-    <Dialog title={<>{nic.name ?? `guest ${nic.vmid}`} · <span className="font-mono">{nic.iface}</span></>} width={420} onClose={onClose}>
-    <div className="mt-2 rounded-ctl border border-line-soft bg-elev p-2 font-mono text-[11px] text-text-3">
-      <div>{nic.model ?? 'unknown'} · {nic.macaddr ?? 'unknown'}</div>
-      <div className="mt-1 break-all">{nic.raw}</div>
-    </div>
-    <p className="mt-2 text-[12px] text-text-3">
-      The adapter model and MAC address are preserved exactly as Proxmox stores
-      them, this form only changes the fields below.
-    </p>
+    <Dialog width={560} onClose={onClose}
+      title={
+        <span className="flex min-w-0 items-center gap-2.5">
+          <span className="grid size-8 shrink-0 place-items-center rounded-tile
+                           border border-line bg-panel-2 text-amber">
+            <Icon name="lan" size={18} />
+          </span>
+          <span className="flex min-w-0 flex-col leading-tight">
+            <span className="truncate">Edit {nic.iface}</span>
+            <span className="truncate font-mono text-[11px] font-normal text-text-3">
+              {nic.name ?? `guest ${nic.vmid}`} · {nic.model ?? 'unknown'}
+            </span>
+          </span>
+        </span>}>
 
     <form onSubmit={submit} className="mt-4 space-y-3">
+      <div className="rounded-card border border-line-soft bg-panel-2 p-4">
+        <h3 className={label}>As Proxmox holds it</h3>
+        <div className="rounded-ctl border border-line-soft bg-elev p-2 font-mono
+                        text-[11px] text-text-3">
+          <div>{nic.model ?? 'unknown'} · {nic.macaddr ?? 'unknown'}</div>
+          <div className="mt-1 break-all">{nic.raw}</div>
+        </div>
+        <p className="mt-2 text-[12px] text-text-3">
+          The adapter model and MAC address are kept exactly as they are. This form
+          changes the fields below and nothing else.
+        </p>
+      </div>
+
+      <div className={BOX}>
       <div>
         <label className={label} htmlFor="nic-bridge">Bridge</label>
         <select id="nic-bridge" className={inputCls} value={bridge}
@@ -156,6 +177,7 @@ export function NicForm({ nic, bridges, onClose }: {
           className={amberLinkCls}>Firewall page</Link>.
         With this off, none of them apply to this NIC.
       </p>
+      </div>
       {error && <p className="text-[12.5px] text-red">{error}</p>}
       <div className="flex justify-end gap-2 pt-1">
         <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>

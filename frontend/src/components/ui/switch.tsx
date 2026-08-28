@@ -7,10 +7,13 @@ import { cn } from "@/lib/utils"
  * Vendored from shadcn/ui, with the checked travel corrected.
  *
  * Upstream translates the thumb by `calc(100% - 2px)`, where 100% is the
- * THUMB's width (16px), giving 14px. The track is w-9 with a 1px border on
- * each side, so its content box is 34px and a 16px thumb has 18px to cross.
- * Four pixels short left a strip of the checked colour visible past the thumb,
- * which reads as a switch that did not finish turning on.
+ * THUMB's own width rather than the distance it has to cover, which left a
+ * strip of the checked colour past the thumb and read as a switch that had
+ * not finished turning on. The track is w-7 with a 1px border each side, so
+ * its content box is 26px and a 12px thumb has 14px to cross.
+ *
+ * Sized down from shadcn's 36x20 too: at 13px labels that switch was the
+ * loudest thing in a settings row it is not the subject of.
  */
 function Switch({
   className,
@@ -20,7 +23,7 @@ function Switch({
     <SwitchPrimitive.Root
       data-slot="switch"
       className={cn(
-        "peer inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border border-transparent shadow-xs transition-all outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:bg-primary data-[state=unchecked]:bg-input",
+        "peer inline-flex h-4 w-7 shrink-0 cursor-pointer items-center rounded-full border border-transparent shadow-xs transition-all outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:bg-primary data-[state=unchecked]:bg-input",
         className
       )}
       {...props}
@@ -28,7 +31,7 @@ function Switch({
       <SwitchPrimitive.Thumb
         data-slot="switch-thumb"
         className={cn(
-          "pointer-events-none block size-4 rounded-full bg-background ring-0 transition-transform data-[state=checked]:translate-x-[18px] data-[state=unchecked]:translate-x-0"
+          "pointer-events-none block size-3 rounded-full bg-background ring-0 transition-transform data-[state=checked]:translate-x-[14px] data-[state=unchecked]:translate-x-0"
         )}
       />
     </SwitchPrimitive.Root>

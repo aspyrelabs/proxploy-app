@@ -1,3 +1,4 @@
+import { DEFAULT_PAGE_SIZE } from '../components/TablePager'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { api } from './client'
 
@@ -27,7 +28,10 @@ export type AuditFilters = {
   to?: string
 }
 
-export const AUDIT_PER_PAGE = 50
+// Kept as the fallback for callers that do not choose, and re-exported from
+// the shared table constants so the Audit log and the App Store offer the same
+// page sizes rather than each inventing one.
+export const AUDIT_PER_PAGE = DEFAULT_PAGE_SIZE
 
 // The one filter-to-query-params mapping, shared by the list fetch and the
 // export URL, so the export can never silently drop a filter the table is
@@ -42,9 +46,10 @@ function filterEntries(f: AuditFilters): [string, string][] {
   return out
 }
 
-export function useAuditLog(filters: AuditFilters, page: number, enabled = true) {
+export function useAuditLog(filters: AuditFilters, page: number, enabled = true,
+                            perPage: number = AUDIT_PER_PAGE) {
   return useQuery({
-    queryKey: ['audit', filters, page],
+    queryKey: ['audit', filters, page, perPage],
     queryFn: () => {
       const p = new URLSearchParams(filterEntries(filters))
       p.set('page', String(page))
@@ -56,7 +61,7 @@ export function useAuditLog(filters: AuditFilters, page: number, enabled = true)
       // surfaces only the JSON body by design, and widening that shared
       // signature for one screen costs more than fetching one extra row.
       // The route slices back to AUDIT_PER_PAGE for display.
-      p.set('per_page', String(AUDIT_PER_PAGE + 1))
+      p.set('per_page', String(perPage + 1))
       return api<AuditRow[]>(`/audit?${p.toString()}`)
     },
     // The filter inputs feed this key, so it changes per keystroke and per

@@ -91,7 +91,7 @@ export function BackupGuestDialog({ guest, onClose }: {
         ) : !checking && (
           <>
             <label className="mt-4 block text-[11px] uppercase tracking-wide text-text-3"
-                   htmlFor="bk-guest-store">Archive lands on</label>
+                   htmlFor="bk-guest-store">Target</label>
             <select id="bk-guest-store" className={inputCls} value={target}
                     onChange={(e) => setStore(e.target.value)}>
               {stores.map((s) => (

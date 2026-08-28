@@ -14,7 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 let capabilities: Record<string, boolean> = {
   monitoring: true, lifecycle: true, console: false, backup: false,
 }
-const scriptCalls: { capabilities: string[]; node_shell: boolean; node_power: boolean }[] = []
+const scriptCalls: { capabilities: string[]; node_shell: boolean }[] = []
 const scriptResult = { script: "# Proxploy\npveum user add proxploy@pve --comment 'Proxploy'\n" }
 
 vi.mock('../api/client', async (importOriginal) => ({
@@ -54,14 +54,16 @@ describe('HostEditDialog setup script', () => {
 
   it('generates and shows the script from the Edit dialog, the same generator HostForm uses', async () => {
     wrap()
-    fireEvent.click(await screen.findByRole('button', { name: 'Generate setup script' }))
+    fireEvent.click(await screen.findByRole('button', { name: /don.t have a token yet/i }))
+    fireEvent.click(screen.getByRole('button', { name: 'Generate script' }))
     expect(await screen.findByText(/pveum user add proxploy@pve/)).toBeInTheDocument()
     expect(scriptCalls).toHaveLength(1)
   })
 
   it('says the pveum user add line fails harmlessly if that user already exists', async () => {
     wrap()
-    fireEvent.click(await screen.findByRole('button', { name: 'Generate setup script' }))
+    fireEvent.click(await screen.findByRole('button', { name: /don.t have a token yet/i }))
+    fireEvent.click(screen.getByRole('button', { name: 'Generate script' }))
     await screen.findByText(/pveum user add proxploy@pve/)
     expect(screen.getByText(/already exists on the node/i)).toBeInTheDocument()
     expect(screen.getByText(/already exists on the node/i).textContent)
@@ -77,7 +79,8 @@ describe('HostEditDialog setup script', () => {
     // HostCapabilityList renders from, so the default is not computed off
     // data that has not arrived yet.
     await screen.findByText('Console')
-    fireEvent.click(screen.getByRole('button', { name: 'Generate setup script' }))
+    fireEvent.click(screen.getByRole('button', { name: /don.t have a token yet/i }))
+    fireEvent.click(screen.getByRole('button', { name: 'Generate script' }))
     await waitFor(() => expect(scriptCalls).toHaveLength(1))
     const requested = scriptCalls[0].capabilities
     expect(requested).not.toContain('lifecycle')
@@ -89,7 +92,8 @@ describe('HostEditDialog setup script', () => {
     capabilities = { monitoring: true, lifecycle: true, console: true, backup: true }
     wrap()
     await screen.findByText('Console')
-    const btn = screen.getByRole('button', { name: 'Generate setup script' })
+    fireEvent.click(screen.getByRole('button', { name: /don.t have a token yet/i }))
+    const btn = screen.getByRole('button', { name: 'Generate script' })
     expect(btn).toBeEnabled()
     fireEvent.click(btn)
     await waitFor(() => expect(scriptCalls).toHaveLength(1))

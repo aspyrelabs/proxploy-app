@@ -8,6 +8,12 @@ import {
 /** Rows per page, shared so the two tables on /backups agree. */
 export const PAGE_SIZE = 10
 
+// The per-page choices any paged view offers, and the one a fresh visit gets.
+// Defined once so the App Store and the Audit log cannot drift apart on what
+// "a page" means.
+export const PAGE_SIZES = [15, 25, 50, 100] as const
+export const DEFAULT_PAGE_SIZE = 25
+
 export const TABLE_SCROLL = "overflow-x-auto"
 export const TABLE_MIN = "min-w-[46rem]"
 

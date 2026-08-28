@@ -6,7 +6,10 @@ export type TeamRow = {
   member_count: number; host_count: number
 }
 
-export type MemberRow = { user_id: number; email: string; display_name: string | null; role: string }
+export type MemberRow = {
+  user_id: number; email: string; display_name: string | null
+  last_login_at: string | null; role: string
+}
 
 // Mirrors GET /users (auth.py::list_users), the member-picker source.
 export type UserRow = {

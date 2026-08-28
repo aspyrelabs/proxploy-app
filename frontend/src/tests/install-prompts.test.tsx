@@ -22,9 +22,11 @@ const GATE = p({
 
 describe('unanswered', () => {
   it('holds Install until a gate is actually ticked', () => {
-    expect(unanswered([GATE], {})).toEqual(['confirm'])
-    expect(unanswered([GATE], { confirm: 'n' })).toEqual(['confirm'])
-    expect(unanswered([GATE], { confirm: 'y' })).toEqual([])
+    // Keyed by variable AND position: docker asks three different questions
+    // through `prompt`, so the variable alone cannot identify an answer.
+    expect(unanswered([GATE], {})).toEqual(['confirm#0'])
+    expect(unanswered([GATE], { 'confirm#0': 'n' })).toEqual(['confirm#0'])
+    expect(unanswered([GATE], { 'confirm#0': 'y' })).toEqual([])
   })
 
   it('lets a yes/no or a defaulted field through unanswered', () => {
@@ -38,10 +40,10 @@ describe('unanswered', () => {
   it('holds Install for a field with nothing to fall back on', () => {
     const key = p({ variable: 'tmdbkey', sensitive: true, label: 'Enter your TMDb API key:' })
     const choice = p({ variable: 'ver', kind: 'choice', choices: ['15', '16'] })
-    expect(unanswered([key, choice], {}).sort()).toEqual(['tmdbkey', 'ver'])
-    expect(unanswered([key, choice], { tmdbkey: 'abc', ver: '16' })).toEqual([])
+    expect(unanswered([key, choice], {}).sort()).toEqual(['tmdbkey#0', 'ver#1'])
+    expect(unanswered([key, choice], { 'tmdbkey#0': 'abc', 'ver#1': '16' })).toEqual([])
     // Whitespace is not an answer.
-    expect(unanswered([key], { tmdbkey: '   ' })).toEqual(['tmdbkey'])
+    expect(unanswered([key], { 'tmdbkey#0': '   ' })).toEqual(['tmdbkey#0'])
   })
 })
 
@@ -69,11 +71,12 @@ describe('PromptFields', () => {
     const { rerender } = render(
       <PromptFields prompts={[GATE]} answers={{}} onChange={onChange} />)
     fireEvent.click(screen.getByRole('checkbox'))
-    expect(onChange).toHaveBeenCalledWith({ confirm: 'y' })
+    expect(onChange).toHaveBeenCalledWith({ 'confirm#0': 'y' })
 
-    rerender(<PromptFields prompts={[GATE]} answers={{ confirm: 'y' }} onChange={onChange} />)
+    rerender(<PromptFields prompts={[GATE]} answers={{ 'confirm#0': 'y' }}
+                           onChange={onChange} />)
     fireEvent.click(screen.getByRole('checkbox'))
-    expect(onChange).toHaveBeenLastCalledWith({ confirm: '' })
+    expect(onChange).toHaveBeenLastCalledWith({ 'confirm#0': '' })
   })
 
   it('masks a sensitive field and says where the value goes', () => {
