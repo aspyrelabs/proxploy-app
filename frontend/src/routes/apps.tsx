@@ -9,6 +9,9 @@ import { AppTable, AppTableSkeleton } from '../components/AppTable'
 import { UpdateAllButton } from '../components/UpdateAllButton'
 import { BulkAdoptDialog } from '../components/BulkAdoptDialog'
 import { Button, amberLinkCls, quietCls, segment } from '../components/ui/button'
+import { ButtonGroup } from '../components/ui/button-group'
+import { Dialog } from '../components/ui/dialog'
+import { useJob } from '../api/jobs'
 import { EmptyState } from '../components/EmptyState'
 import { JobLog } from '../components/JobLog'
 import { QueryState } from '../components/QueryState'
@@ -185,10 +188,12 @@ export function UpdatePanel({ appId, app }:
   const ent = useEntitlements()
   const [consent, setConsent] = useState(false)
   const [jobId, setJobId] = useState<number | null>(null)
-  // services/appstore.py::run_update reports the same ctx.progress(10)/(80)/
-  // (100) shape run_install does: null on the freshly-enqueued job the
-  // update POST returns, seeded from that row rather than assumed zero.
-  const [progress, setProgress] = useState<number | null>(null)
+  const [logOpen, setLogOpen] = useState(false)
+  // run_update reports ctx.progress(10)/(80)/(100): three steps, so a ring
+  // drawn from them sat still and then jumped to full without ever having
+  // measured anything. The spinner says "working" without claiming to know
+  // how far along it is, and the transcript is where the real answer is.
+  const job = useJob(jobId)
   // Wait for the first entitlements fetch before deciding (settings.tsx
   // precedent), otherwise this fires GET /update for every viewer of every
   // app overview and offers a consent+button whose POST always 403s.
@@ -203,7 +208,6 @@ export function UpdatePanel({ appId, app }:
       `/apps/${appId}/update`, { method: 'POST', body: JSON.stringify({ consent: true }) }),
     onSuccess: (r) => {
       setJobId(r.job.id)
-      setProgress(r.job.progress_pct)
       notify.success('Update started.')
     },
     onError: () => notify.error('Could not start the update, try again.'),
@@ -223,15 +227,28 @@ export function UpdatePanel({ appId, app }:
     </div>
   }
   if (jobId != null) {
+    const status = job.data?.status
+    const settled = status != null && status !== 'running' && status !== 'queued'
     return (
-      <div>
-        <div className="mb-3 flex items-center gap-2">
-          {/* Never shown before the first step reports in: a zero here would
-              read as stalled rather than as "not started yet". */}
-          {progress != null && <Loading value={progress} label="Update progress" size={28} />}
-          <span className="text-[12.5px] text-text-2">Updating {app.name}…</span>
-        </div>
-        <JobLog jobId={jobId} onProgress={setProgress} />
+      <div className="flex flex-col items-center gap-2 py-2">
+        {!settled && <Loading label={`Updating ${app.name}`} size={28} />}
+        <span className="text-[12.5px] text-text-2">
+          {!settled ? 'Updating…'
+            : status === 'succeeded' ? `Updated ${app.name}.`
+              : `Update ${status}. Open the log to see why.`}
+        </span>
+        <ButtonGroup>
+          <Button size="sm" variant="ghost" onClick={() => setLogOpen(true)}>Logs</Button>
+        </ButtonGroup>
+        {logOpen && (
+          <Dialog title={<>{app.name} update log</>} width="max(640px, 70vw)"
+                  onClose={() => setLogOpen(false)}>
+            <div className="mt-3 flex h-[60vh] min-h-0 flex-col
+                            [&>div]:min-h-0 [&>div]:flex-1">
+              <JobLog jobId={jobId} height="fill" />
+            </div>
+          </Dialog>
+        )}
       </div>
     )
   }
