@@ -1538,6 +1538,14 @@ class ProxmoxClient:
             raise self._wrap(f"attaching storage {config.get('storage')!r} failed",
                              e) from e
 
+    def storage_config(self, storage: str) -> dict:
+        try:
+            return self._connect().storage(storage).get()
+        except ProxmoxError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap(f"reading storage {storage!r} failed", e) from e
+
     def storage_update(self, storage: str, config: dict) -> None:
         """PUT /storage/{storage}, only the keys given are changed."""
         try:

@@ -64,6 +64,14 @@ export function useStorageDetail(hostId: number | null, name: string | null) {
   })
 }
 
+export function useStorageConfig(hostId: number | null, name: string | null) {
+  return useQuery({
+    queryKey: ['storage', hostId, name, 'config'],
+    enabled: hostId != null && name != null,
+    queryFn: () => api<Record<string, string | number>>(`/storage/${hostId}/${name}/config`),
+  })
+}
+
 export function useStorageContent(hostId: number | null, name: string | null,
                                   contentType?: string) {
   return useQuery({

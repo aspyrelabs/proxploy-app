@@ -1,10 +1,11 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { ApiError, api } from '../api/client'
 import { useEntitlements } from '../api/hooks'
 import { notify } from '../lib/notify'
 import { useAttachStorage, useDetachStorage, useEditStorage } from '../api/storage'
 import type { StorageRow } from '../api/storage'
+import { useStorageConfig } from '../api/storage'
 import { LockVeil } from './LockVeil'
 import { inputCls } from './LoginForm'
 import { Button } from './ui/button'
@@ -88,6 +89,14 @@ export function StorageForm({ existing, onClose }:
     content: existing?.content.join(',') ?? '',
   })
   const set = (k: string, v: string) => setCfg((s) => ({ ...s, [k]: v }))
+
+  const configured = useStorageConfig(existing?.host_id ?? null, existing?.storage ?? null)
+  useEffect(() => {
+    if (!configured.data) return
+    const seed = Object.fromEntries(
+      Object.entries(configured.data).map(([k, v]) => [k, String(v)]))
+    setCfg((s) => ({ ...seed, ...s }))
+  }, [configured.data])
 
   const fields: [string, string, string, string?][] = FIELDS[type] ?? []
   // `content` stays a comma string in state, the shape both PVE and the rest

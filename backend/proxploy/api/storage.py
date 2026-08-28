@@ -18,7 +18,7 @@ from proxploy.api.deps import (authorize, cluster_scope, get_db,
 from proxploy.api.jobs import enqueue_and_audit
 from proxploy.pollers import pool_key, storage_snapshot_rows
 from proxploy.models import Host, Schedule, User
-from proxploy.services.audit import write_audit
+from proxploy.services.audit import _is_secret_key, write_audit
 from proxploy.services.hostclient import client_for_host
 from proxploy.services.proxmox import ProxmoxError
 
@@ -206,6 +206,21 @@ def storage_detail(request: Request, host_id: int, name: str,
             "avail_bytes": int(st.get("avail") or 0),
             "used_pct": _pct(used, total),
             "nodes": _nodes_with(request, host_id, name) or [node]}
+
+
+@router.get("/{host_id}/{name}/config",
+            dependencies=[Depends(_manage),
+                          Depends(require_entitlement("storage.manage"))])
+def storage_config(request: Request, host_id: int, name: str, db=Depends(get_db),
+                   user: User = Depends(_manage)):
+    host = _host_or_404(db, host_id)
+    try:
+        cfg = client_for_host(request.app, db, host).storage_config(name)
+    except ProxmoxError as e:
+        raise HTTPException(502, str(e))
+    return {k: v for k, v in cfg.items()
+            if not _is_secret_key(k) and "key" not in k.lower()
+            and k not in ("digest", "storage", "type", "content")}
 
 
 @router.get("/{host_id}/{name}/content",
