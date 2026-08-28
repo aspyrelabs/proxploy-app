@@ -22,7 +22,7 @@ import { GuestList, GuestListSkeleton, toGuests } from '../components/GuestList'
 import { HardwareTab } from '../components/HardwareTab'
 import { HostActionsMenu } from '../components/HostActionsMenu'
 import { NodeIdentityRail } from '../components/NodeIdentityRail'
-import { HostForm } from '../components/HostForm'
+import { AddHostDialog } from '../components/AddHostDialog'
 import { NodeCard, NodeCardSkeleton } from '../components/NodeCard'
 import { dedupeNodes, type MergedNode } from '../lib/nodes'
 import { QueryState } from '../components/QueryState'
@@ -131,30 +131,17 @@ function AddHostSection({ hostCount }: { hostCount: number }) {
     <>
       <div className="mb-3 flex items-center justify-between">
         <h2 className="font-display text-[16px] font-semibold">Nodes</h2>
-        <Button variant="ghost" onClick={() => setOpen((o) => !o)}>
-          {open ? 'Cancel' : 'Add host'}
-        </Button>
+        <Button variant="ghost" onClick={() => setOpen(true)}>Add host</Button>
       </div>
-      {open && (blocked ? (
-        <div className={`${card} mb-4`}>
-          <p className="text-[13px] text-text-2">
-            Managing more than one host needs the multi-host plan.
-          </p>
-          <p className="mt-1 text-[12px] text-text-3">
-            One host is included. Every node of that host's cluster is already
-            managed here, at no extra tier.
-          </p>
-        </div>
-      ) : (
-        <div className={`${card} mb-4`}>
-          <HostForm onCreated={() => {
+      {open && (
+        <AddHostDialog blocked={blocked} onClose={() => setOpen(false)}
+          onCreated={() => {
             setOpen(false)
             notify.success('Host added. Its nodes appear as the first poll lands.')
             qc.invalidateQueries({ queryKey: ['hosts'] })
             qc.invalidateQueries({ queryKey: ['cluster'] })
           }} />
-        </div>
-      ))}
+      )}
     </>
   )
 }

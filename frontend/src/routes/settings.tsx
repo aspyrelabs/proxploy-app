@@ -19,7 +19,7 @@ import { ChannelEditForm } from '../components/ChannelEditForm'
 import { EventsMatrix } from '../components/EventsMatrix'
 import type { ChannelRow } from '../components/ChannelForm'
 import { HostEditDialog } from '../components/HostEditDialog'
-import { HostForm } from '../components/HostForm'
+import { AddHostDialog } from '../components/AddHostDialog'
 import { HostRemoveDialog } from '../components/HostRemoveDialog'
 import { HostTasksPanel } from '../components/HostTasksPanel'
 import { QueryState } from '../components/QueryState'
@@ -35,8 +35,6 @@ import { SessionsCard } from '../components/SessionsCard'
 import { TrustedDevicesCard } from '../components/TrustedDevicesCard'
 import { UpdateCard } from '../components/UpdateCard'
 import { Button } from '../components/ui/button'
-import { Dialog } from '../components/ui/dialog'
-import { Icon } from '../components/ui/icon'
 import { CardLoadingOverlay } from '../components/ui/card-loading-overlay'
 import { Skeleton, SkeletonGroup, SkeletonTable } from '../components/ui/skeleton'
 import { useTeams } from '../api/teams'
@@ -632,25 +630,11 @@ export function SettingsPage() {
           )}
         </QueryState>
         {adding && (
-          <Dialog width={560} scrollBody onClose={() => setAdding(false)}
-            title={
-              <span className="flex min-w-0 items-center gap-2.5">
-                <span className="grid size-8 shrink-0 place-items-center rounded-tile
-                                 border border-line bg-panel-2 text-amber">
-                  <Icon name="dns" size={18} />
-                </span>
-                <span className="flex min-w-0 flex-col leading-tight">
-                  <span className="truncate">Add a host</span>
-                  <span className="truncate font-mono text-[11px] font-normal text-text-3">
-                    proxmox ve · api token
-                  </span>
-                </span>
-              </span>}>
-            <HostForm onCreated={() => {
+          <AddHostDialog onClose={() => setAdding(false)}
+            onCreated={() => {
               setAdding(false)
               qc.invalidateQueries({ queryKey: ['hosts'] })
             }} />
-          </Dialog>
         )}
         {editingHost && (
           <HostEditDialog hostId={editingHost.id} host={editingHost}
