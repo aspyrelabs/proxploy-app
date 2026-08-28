@@ -399,8 +399,20 @@ export function VmOptionsDialog({ vm, onClose }: { vm: VmRow; onClose: () => voi
   })
 
   return (
-    <Dialog title={<>Options for <span className="font-mono">{vm.name}</span></>}
-            width={620} scrollBody onClose={onClose}>
+    <Dialog width={672} scrollBody onClose={onClose}
+      title={
+        <span className="flex min-w-0 items-center gap-2.5">
+          <span className="grid size-8 shrink-0 place-items-center rounded-tile
+                           border border-line bg-panel-2 text-amber">
+            <Icon name="computer" size={18} />
+          </span>
+          <span className="flex min-w-0 flex-col leading-tight">
+            <span className="truncate">Options for {vm.name}</span>
+            <span className="truncate font-mono text-[11px] font-normal text-text-3">
+              VM {vm.vmid} · {vm.host_name}
+            </span>
+          </span>
+        </span>}>
       {q.isLoading && <div className="mt-4"><Loading label="Reading the VM's settings" size={18} /></div>}
       {q.isError && (
         <p className="mt-4 text-[12.5px] text-red">
@@ -518,7 +530,8 @@ function OptionsForm({ vm, data, onClose }: {
           })}
         </nav>
 
-        <div className="min-w-0 divide-y divide-line-soft">
+        <div className="min-w-0 divide-y divide-line-soft rounded-card border
+                        border-line-soft bg-panel-2 px-4">
           {section === 'general' && (
             <>
               <OptionRow label="Name" htmlFor="vmopt-name" changed={changed('name')}
@@ -537,10 +550,11 @@ function OptionsForm({ vm, data, onClose }: {
               <OptionRow label="Start and shutdown order" changed={changed('startup')}
                 hint="Guests start in order, lowest first, and shut down in reverse. The delays are how long the host waits after starting this one, and how long it waits for it to shut down before pulling the plug. Clear all three for no set order."
                 effect={<Effect optionKey="startup" running={running} pending={pending} />}>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="flex flex-wrap gap-2">
                   {STARTUP_FIELDS.map(([f, l]) => (
-                    <div key={f}>
-                      <label htmlFor={`vmopt-startup-${f}`} className={smallLabel}>{l}</label>
+                    <div key={f} className="w-28">
+                      <label htmlFor={`vmopt-startup-${f}`}
+                        className={`${smallLabel} whitespace-nowrap`}>{l}</label>
                       <input id={`vmopt-startup-${f}`} className={inputCls} type="number" min={0}
                         value={form.startup[f] ?? ''}
                         onChange={(e) => setProp('startup', f, e.target.value)} />
