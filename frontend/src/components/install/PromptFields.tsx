@@ -1,4 +1,5 @@
 import { Icon } from '../ui/icon'
+import { segment } from '../ui/button'
 import type { Prompt } from '../../lib/install-prompts'
 import { answerKey } from '../../lib/install-prompts'
 
@@ -15,6 +16,14 @@ import { answerKey } from '../../lib/install-prompts'
  * unticked, and blocks Install until it is ticked. Pre-ticking it would be
  * defaulting it to yes with extra steps.
  */
+const YES_NO = [['y', 'Yes'], ['n', 'No']] as const
+
+/** The question without its shell syntax: the control states the options now,
+ *  so a trailing `<y/N>` or `[y/N]` is the script's punctuation, not ours. */
+function askedAs(label: string): string {
+  return label.replace(/\s*[<[(][yY]\s*\/\s*[nN][>\])]\s*:?\s*$/, '').trim()
+}
+
 export function PromptFields({ prompts, answers, onChange }: {
   prompts: Prompt[]
   answers: Record<string, string>
@@ -53,12 +62,20 @@ export function PromptFields({ prompts, answers, onChange }: {
               </div>
             </div>
           ) : p.kind === 'yesno' ? (
-            <label className="flex items-start gap-2 text-[12px] text-text-2">
-              <input type="checkbox" className="mt-[3px]"
-                     checked={(answers[k] ?? p.default ?? 'n') === 'y'}
-                     onChange={(e) => set(k, e.target.checked ? 'y' : 'n')} />
-              <span>{p.label}</span>
-            </label>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-[12px] text-text-2">{askedAs(p.label)}</span>
+              <div className="inline-flex shrink-0 overflow-hidden rounded-ctl border border-line">
+                {YES_NO.map(([value, word]) => (
+                  <button key={value} type="button"
+                    aria-pressed={(answers[k] ?? p.default ?? 'n') === value}
+                    onClick={() => set(k, value)}
+                    className={`px-2.5 py-1 text-[12px] ${
+                      segment((answers[k] ?? p.default ?? 'n') === value)}`}>
+                    {word}
+                  </button>
+                ))}
+              </div>
+            </div>
           ) : (
             <>
               <label htmlFor={`prompt-${k}`} className="text-[12px] text-text-2">
