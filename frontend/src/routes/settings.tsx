@@ -1,6 +1,5 @@
 import { Fragment, useState } from 'react'
 import type { ReactNode } from 'react'
-import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { Link, createRoute, useSearch } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { shellRoute } from './shell'
@@ -36,7 +35,6 @@ import { SessionsCard } from '../components/SessionsCard'
 import { TrustedDevicesCard } from '../components/TrustedDevicesCard'
 import { UpdateCard } from '../components/UpdateCard'
 import { Button } from '../components/ui/button'
-import { Icon } from '../components/ui/icon'
 import { CardLoadingOverlay } from '../components/ui/card-loading-overlay'
 import { Skeleton, SkeletonGroup, SkeletonTable } from '../components/ui/skeleton'
 import { useTeams } from '../api/teams'
@@ -337,53 +335,6 @@ export function SchedulesCard({ only, exclude, title = 'Schedules', canAdd = tru
  *  asks this once for a new install; an existing install has no other
  *  prompt. "None of these" is a real, storable answer.
  */
-// The same two class strings HostActionsMenu, VmActionsMenu and AppIconMenu
-// share, destructive vocabulary included.
-const itemCls = 'flex cursor-pointer items-center gap-2 px-3 py-2 text-[13px] text-text-2 '
-             + 'outline-none data-[highlighted]:bg-panel-2 data-[highlighted]:text-text'
-const destructiveItemCls = 'flex cursor-pointer items-center gap-2 border-t border-line-soft '
-                         + 'px-3 py-2 text-[13px] text-red outline-none data-[highlighted]:bg-red-dim'
-
-/**
- * Edit, Tasks and Remove for one enrolled host, behind one trigger.
- * Sync stays out here because it is the one with a pending state worth
- * watching and the action an operator repeats. Not HostActionsMenu:
- * that one carries Reboot and Power off. Same Radix primitive and class
- * strings, so they read as one family.
- */
-function HostRowMenu({ name, onEdit, onTasks, onRemove, tasksOpen }: {
-  name: string
-  onEdit: () => void
-  onTasks: () => void
-  onRemove: () => void
-  tasksOpen: boolean
-}) {
-  return (
-    <DropdownMenu.Root>
-      <DropdownMenu.Trigger asChild>
-        <Button variant="ghost" size="icon-xs" aria-label={`Actions for ${name}`}>
-          <Icon name="more_vert" />
-        </Button>
-      </DropdownMenu.Trigger>
-      <DropdownMenu.Portal>
-        <DropdownMenu.Content align="end" sideOffset={8}
-          className="z-50 w-48 overflow-hidden rounded-card border border-line bg-panel
-                     shadow-[0_12px_32px_rgba(0,0,0,.35)]">
-          <DropdownMenu.Item onSelect={onEdit} className={itemCls}>
-            <Icon name="edit" size={16} /> Edit
-          </DropdownMenu.Item>
-          <DropdownMenu.Item onSelect={onTasks} className={itemCls}>
-            <Icon name="fact_check" size={16} /> {tasksOpen ? 'Hide tasks' : 'Tasks'}
-          </DropdownMenu.Item>
-          <DropdownMenu.Item onSelect={onRemove} className={destructiveItemCls}>
-            <Icon name="delete" size={16} /> Remove
-          </DropdownMenu.Item>
-        </DropdownMenu.Content>
-      </DropdownMenu.Portal>
-    </DropdownMenu.Root>
-  )
-}
-
 const selfRow = 'mb-4 flex flex-wrap items-center gap-2 rounded-ctl border '
   + 'border-line-soft bg-panel-2 px-3 py-2 text-[12.5px]'
 
@@ -645,25 +596,25 @@ export function SettingsPage() {
                           </select>
                         ) : <span className="text-text-3">n/a</span>}
                       </td>
-                      <td className="py-2">
-                        {/* nowrap, not wrap: wrapping let the cell collapse
-                            below the width four buttons actually need, so with
-                            the section rail taking 216px the row stacked into
-                            three lines instead of scrolling. The card's own
-                            overflow-x-auto below is what handles a narrow
-                            pane, and it can only do that if the cell reports
-                            its real width. */}
-                        <div className="flex flex-nowrap justify-end gap-1.5">
+                      <td className="py-2 text-right">
+                        <ButtonGroup>
                           <Button size="sm" variant="ghost"
                             disabled={syncHost.isPending && syncHost.variables?.id === h.id}
                             onClick={() => syncHost.mutate(h)}>
                             {syncHost.isPending && syncHost.variables?.id === h.id ? 'Syncing…' : 'Sync'}
                           </Button>
-                          <HostRowMenu name={h.name} tasksOpen={tasksHostId === h.id}
-                            onEdit={() => setEditingHost(h)}
-                            onTasks={() => setTasksHostId(id => id === h.id ? null : h.id)}
-                            onRemove={() => setRemovingHost(h)} />
-                        </div>
+                          <ButtonGroupSeparator />
+                          <RowActionsMenu label={`Actions for ${h.name}`}
+                            actions={[
+                              { label: 'Edit', icon: 'edit',
+                                onSelect: () => setEditingHost(h) },
+                              { label: tasksHostId === h.id ? 'Hide tasks' : 'Tasks',
+                                icon: 'fact_check',
+                                onSelect: () => setTasksHostId(id => id === h.id ? null : h.id) },
+                              { label: 'Remove', icon: 'delete', destructive: true,
+                                onSelect: () => setRemovingHost(h) },
+                            ]} />
+                        </ButtonGroup>
                       </td>
                     </tr>
                     {tasksHostId === h.id && (
