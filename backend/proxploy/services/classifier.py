@@ -57,9 +57,6 @@ UNSUPPORTED_INTERACTIVE = "install script requires interactive input, no non-int
 UNSUPPORTED_UNNAMED_PROMPT = (
     "install script prompts without assigning the answer to a variable, "
     "so there is nothing to answer")
-UNSUPPORTED_REUSED_VARIABLE = (
-    "install script asks several different questions through one variable, "
-    "so a single answer cannot mean different things to each of them")
 UNSUPPORTED_RETRY_LOOP = (
     "install script re-prompts until the answer validates, which a supplied "
     "answer cannot satisfy without hanging")
@@ -356,20 +353,6 @@ def classify_install_feasibility(ct_script: str, install_script: str) -> tuple[b
     for prompt in prompts:
         if prompt["in_loop"]:
             return False, UNSUPPORTED_RETRY_LOOP
-
-    # One variable, several different questions. Answers reach the script BY
-    # VARIABLE, so one export answers all of them, and the questions are not
-    # interchangeable: docker reads "add Docker Compose?", "add the Portainer
-    # Agent?" and "expose the Docker TCP socket?" all into `prompt`. Ticking
-    # the first would expose the socket, which is precisely the answer that
-    # must stay separate. Found on node1 on 2026-08-27; the install was safe
-    # only because every default declined.
-    #
-    # Answerable in principle by rewriting the script we run, which is a much
-    # bigger promise than answering the questions it asks.
-    names = [p["variable"] for p in prompts]
-    if len(names) != len(set(names)):
-        return False, UNSUPPORTED_REUSED_VARIABLE
 
     # extract_prompts drops a prompt it cannot name, so a count mismatch means
     # this script asks something we would never present. Compared rather than

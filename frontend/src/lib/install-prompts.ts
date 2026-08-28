@@ -23,13 +23,18 @@ export type Prompt = {
  * is a refusal. Anything else counts only when it is blank AND has nothing to
  * fall back on, since a yes/no or a stated default is filled in server side.
  */
+export function answerKey(prompt: Prompt, index: number): string {
+  return `${prompt.variable}#${index}`
+}
+
 export function unanswered(prompts: Prompt[], answers: Record<string, string>): string[] {
   return prompts
-    .filter((p) => {
-      const given = (answers[p.variable] ?? '').trim()
+    .map((p, i) => [p, answerKey(p, i)] as const)
+    .filter(([p, key]) => {
+      const given = (answers[key] ?? '').trim()
       if (p.gate) return given.toLowerCase() !== 'y'
       if (given !== '') return false
       return p.kind !== 'yesno' && p.default == null
     })
-    .map((p) => p.variable)
+    .map(([, key]) => key)
 }

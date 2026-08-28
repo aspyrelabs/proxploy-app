@@ -47,14 +47,14 @@ def test_a_sensitive_answer_never_lands_in_job_params(client, csrf_header,
     bootstrap_admin(client)
     host_id = _seed(client)
     r = _post(client, csrf_header, host_id,
-              {"confirm": "y", "unbound": "y", "tmdbkey": SENTINEL})
+              {"confirm#0": "y", "unbound#1": "y", "tmdbkey#2": SENTINEL})
     assert r.status_code == 202, r.text
 
     with client.app.state.sessionmaker() as db:
         job = db.query(Job).filter_by(kind="app.install").one()
         row = db.query(InstallAnswer).one()
     assert SENTINEL not in str(job.params), "the API leaked it into jobs.params"
-    assert job.params["answers"] == {"confirm": "y", "unbound": "y"}
+    assert job.params["answers"] == {"confirm#0": "y", "unbound#1": "y"}
     assert job.params["answers_handle"] == row.handle
     # At rest it is ciphertext, and the row is not yet attached to any app
     # because the job that would create one has not run.
@@ -69,7 +69,7 @@ def test_an_answer_the_script_never_asked_for_is_refused(client, csrf_header,
     bootstrap_admin(client)
     host_id = _seed(client)
     r = _post(client, csrf_header, host_id,
-              {"confirm": "y", "tmdbkey": "k", "LD_PRELOAD": "/tmp/evil.so"})
+              {"confirm#0": "y", "tmdbkey#2": "k", "LD_PRELOAD": "/tmp/evil.so"})
     assert r.status_code == 400, r.text
     assert "LD_PRELOAD" in r.json()["detail"]
     assert client.get("/api/v1/jobs").json() == [], "enqueued despite refusing"
@@ -83,11 +83,11 @@ def test_a_gate_must_be_answered_and_must_be_answered_yes(client, csrf_header,
     host_id = _seed(client)
 
     # Omitted entirely: refused rather than defaulted.
-    r = _post(client, csrf_header, host_id, {"tmdbkey": "k"})
+    r = _post(client, csrf_header, host_id, {"tmdbkey#2": "k"})
     assert r.status_code == 400 and "confirm" in r.json()["detail"]
 
     # Explicitly declined: refused, and nothing is installed.
-    r = _post(client, csrf_header, host_id, {"confirm": "n", "tmdbkey": "k"})
+    r = _post(client, csrf_header, host_id, {"confirm#0": "n", "tmdbkey#2": "k"})
     assert r.status_code == 400 and "not confirmed" in r.json()["detail"]
 
     assert client.get("/api/v1/jobs").json() == []
@@ -99,7 +99,7 @@ def test_a_required_free_text_answer_cannot_be_skipped(client, csrf_header,
     install that blocks at the prompt. Refuse at the door instead."""
     bootstrap_admin(client)
     host_id = _seed(client)
-    r = _post(client, csrf_header, host_id, {"confirm": "y"})
+    r = _post(client, csrf_header, host_id, {"confirm#0": "y"})
     assert r.status_code == 400
     assert "tmdbkey" in r.json()["detail"] and "TMDb API key" in r.json()["detail"]
 
@@ -109,11 +109,11 @@ def test_a_defaultable_prompt_may_be_omitted(client, csrf_header, bootstrap_admi
     the handler fills it from the recorded default."""
     bootstrap_admin(client)
     host_id = _seed(client)
-    r = _post(client, csrf_header, host_id, {"confirm": "y", "tmdbkey": SENTINEL})
+    r = _post(client, csrf_header, host_id, {"confirm#0": "y", "tmdbkey#2": SENTINEL})
     assert r.status_code == 202, r.text
     with client.app.state.sessionmaker() as db:
         job = db.query(Job).filter_by(kind="app.install").one()
-    assert "unbound" not in job.params["answers"]
+    assert "unbound#1" not in job.params["answers"]
 
 
 def test_an_app_that_asks_nothing_stages_nothing(client, csrf_header, bootstrap_admin):
@@ -135,7 +135,7 @@ def test_the_audit_row_records_which_prompts_were_answered_never_the_values(
     bootstrap_admin(client)
     host_id = _seed(client)
     r = _post(client, csrf_header, host_id,
-              {"confirm": "y", "unbound": "y", "tmdbkey": SENTINEL})
+              {"confirm#0": "y", "unbound#1": "y", "tmdbkey#2": SENTINEL})
     assert r.status_code == 202, r.text
     rows = client.get("/api/v1/audit").json()
     body = str(rows)

@@ -136,6 +136,15 @@ class AnswerError(ValueError):
     """A refusal the route turns into a 400, never a 500."""
 
 
+def answer_key(prompt: dict, index: int) -> str:
+    return f"{prompt['variable']}#{index}"
+
+
+def occurrence_of(prompts: list[dict], index: int) -> int:
+    name = prompts[index]["variable"]
+    return sum(1 for p in prompts[:index + 1] if p["variable"] == name)
+
+
 def prepare(prompts: list[dict] | None, answers: dict[str, str] | None
             ) -> tuple[dict, dict]:
     """Validate answers against the prompts, split into (plain, secret).
@@ -150,9 +159,9 @@ def prepare(prompts: list[dict] | None, answers: dict[str, str] | None
     """
     prompts = prompts or []
     answers = answers or {}
-    by_name = {p["variable"]: p for p in prompts}
+    by_key = {answer_key(p, i): p for i, p in enumerate(prompts)}
 
-    unknown = sorted(set(answers) - set(by_name))
+    unknown = sorted(set(answers) - set(by_key))
     if unknown:
         # Not pedantry: these become environment variables in a root shell on
         # the node. Only names this script actually asks about may pass.
@@ -160,10 +169,11 @@ def prepare(prompts: list[dict] | None, answers: dict[str, str] | None
 
     plain: dict[str, str] = {}
     secret: dict[str, str] = {}
-    for name, prompt in by_name.items():
+    for key, prompt in by_key.items():
+        name = prompt["variable"]
         if not _NAME_RE.fullmatch(name):
             raise AnswerError(f"unusable variable name in the catalog: {name!r}")
-        given = answers.get(name)
+        given = answers.get(key)
         if given is None or str(given) == "":
             if prompt.get("gate"):
                 raise AnswerError(
@@ -175,7 +185,7 @@ def prepare(prompts: list[dict] | None, answers: dict[str, str] | None
         value = str(given)
         if prompt.get("gate") and value.strip().lower() not in AFFIRMATIVE:
             raise AnswerError(f"{name}: not confirmed, so nothing was installed")
-        (secret if prompt.get("sensitive") else plain)[name] = value
+        (secret if prompt.get("sensitive") else plain)[key] = value
     return plain, secret
 
 
@@ -186,11 +196,11 @@ def defaults_for(prompts: list[dict] | None) -> dict[str, str]:
     it can never acquire a default here however it is shaped.
     """
     out: dict[str, str] = {}
-    for p in prompts or []:
+    for i, p in enumerate(prompts or []):
         if not answerable_without_asking(p):
             continue
         if p["kind"] == "yesno":
-            out[p["variable"]] = p.get("default") or "n"
+            out[answer_key(p, i)] = p.get("default") or "n"
         elif p.get("default") is not None:
-            out[p["variable"]] = str(p["default"])
+            out[answer_key(p, i)] = str(p["default"])
     return out

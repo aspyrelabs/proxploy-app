@@ -154,29 +154,25 @@ def test_one_unanswerable_prompt_condemns_the_whole_script():
     assert [p["variable"] for p in extract_prompts(script)] == ["prompt", "NAME"]
 
 
-def test_one_variable_asking_several_questions_keeps_the_script_unsupported():
-    """docker's, verbatim in shape. Answers reach the script BY VARIABLE, so
-    one export answers all three reads, and these three are not
-    interchangeable: ticking "add Docker Compose" would also expose the Docker
-    TCP socket. Found on node1, where the install was safe only because every
-    default declined.
-
-    14 scripts in the catalog do this, 287,563 recorded installs, docker among
-    them. Answering them needs the script rewritten rather than answered, which
-    is a much larger promise than this makes."""
-    from proxploy.services.classifier import (UNSUPPORTED_REUSED_VARIABLE,
-                                              classify_install_feasibility)
+def test_one_variable_asking_several_questions_is_answered_per_question():
+    """docker's, verbatim in shape. Ticking "add Docker Compose" must not also
+    expose the Docker TCP socket, so the two reads into `prompt` carry their
+    own identity and their own answer."""
+    from proxploy.services.classifier import classify_install_feasibility
+    from proxploy.services.installanswers import answer_key, occurrence_of
     script = '\n'.join([
         'read -r -p "${TAB3}Would you like to add Docker Compose? <y/N> " prompt',
         'if [[ "${prompt,,}" =~ ^(y|yes)$ ]]; then add_compose; fi',
         'read -r -p "${TAB3}Would you like to expose the Docker TCP socket? <y/N> " prompt',
         'if [[ "${prompt,,}" =~ ^(y|yes)$ ]]; then expose_socket; fi',
     ])
-    # Both prompts are recovered, so a card can say what it could not answer.
-    assert [p["label"][:20] for p in extract_prompts(script)] == [
+    prompts = extract_prompts(script)
+    assert [p["label"][:20] for p in prompts] == [
         "Would you like to ad", "Would you like to ex"]
+    assert [answer_key(p, i) for i, p in enumerate(prompts)] == ["prompt#0", "prompt#1"]
+    assert [occurrence_of(prompts, i) for i in range(2)] == [1, 2]
     ok, reason = classify_install_feasibility("build_container\n", script)
-    assert ok is False and reason == UNSUPPORTED_REUSED_VARIABLE
+    assert ok is True and reason is None
 
 
 def test_distinct_variables_are_still_fine():

@@ -146,8 +146,10 @@ def test_apply_answers_allowlists_only_what_it_was_given(tmp_path):
         app = make_job_app(tmp_path)
         ctx = JobContext(JobBackend(app), 1)
         env: dict = {}
-        out = apply_answers(ctx, env, "bash -c run", {"VER": "17"},
-                            {"TMDBKEY": SENTINEL})
+        prompts = [{"variable": "VER", "kind": "text", "label": "v"},
+                   {"variable": "TMDBKEY", "kind": "text", "label": "k"}]
+        out = apply_answers(ctx, env, "bash -c run", {"VER#0": "17"},
+                            {"TMDBKEY#1": SENTINEL}, prompts)
         # Wrapped rather than prefixed. executor/ssh.py puts `NAME=value ...`
         # in front of whatever this returns, and a function definition cannot
         # follow an environment prefix: a real node answered
@@ -155,7 +157,7 @@ def test_apply_answers_allowlists_only_what_it_was_given(tmp_path):
         assert out.startswith("bash -c ")
         assert READ_SHIM in out and out.endswith("'")
         assert not out.startswith(READ_SHIM), "prefixing is the bug, not the fix"
-        assert env["VER"] == "17" and env["TMDBKEY"] == SENTINEL
+        assert env["PXP_A_VER_1"] == "17" and env["PXP_A_TMDBKEY_1"] == SENTINEL
         assert set(env["PXP_ANSWERED"].split()) == {"VER", "TMDBKEY"}
         # The secret is hidden; the version number stays readable, because a
         # transcript with [redacted] where "17" should be is unusable.

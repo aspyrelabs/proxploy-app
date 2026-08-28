@@ -1,5 +1,6 @@
 import { Icon } from '../ui/icon'
 import type { Prompt } from '../../lib/install-prompts'
+import { answerKey } from '../../lib/install-prompts'
 
 /**
  * The questions the upstream install script asks, rendered as a form.
@@ -28,8 +29,10 @@ export function PromptFields({ prompts, answers, onChange }: {
         This app's installer asks {prompts.length === 1 ? 'a question' : 'some questions'}
       </div>
 
-      {prompts.map((p) => (
-        <div key={p.variable} className="flex flex-col gap-1.5">
+      {prompts.map((p, i) => {
+        const k = answerKey(p, i)
+        return (
+        <div key={k} className="flex flex-col gap-1.5">
           {p.gate ? (
             <div className="rounded-ctl border border-amber/40 bg-amber-dim p-3">
               <div className="flex items-start gap-2">
@@ -42,8 +45,8 @@ export function PromptFields({ prompts, answers, onChange }: {
                   ))}
                   <label className="mt-1 flex items-start gap-2 text-[12px] text-text-2">
                     <input type="checkbox" className="mt-[3px]"
-                           checked={(answers[p.variable] ?? '') === 'y'}
-                           onChange={(e) => set(p.variable, e.target.checked ? 'y' : '')} />
+                           checked={(answers[k] ?? '') === 'y'}
+                           onChange={(e) => set(k, e.target.checked ? 'y' : '')} />
                     <span>{p.label}</span>
                   </label>
                 </div>
@@ -52,25 +55,25 @@ export function PromptFields({ prompts, answers, onChange }: {
           ) : p.kind === 'yesno' ? (
             <label className="flex items-start gap-2 text-[12px] text-text-2">
               <input type="checkbox" className="mt-[3px]"
-                     checked={(answers[p.variable] ?? p.default ?? 'n') === 'y'}
-                     onChange={(e) => set(p.variable, e.target.checked ? 'y' : 'n')} />
+                     checked={(answers[k] ?? p.default ?? 'n') === 'y'}
+                     onChange={(e) => set(k, e.target.checked ? 'y' : 'n')} />
               <span>{p.label}</span>
             </label>
           ) : (
             <>
-              <label htmlFor={`prompt-${p.variable}`} className="text-[12px] text-text-2">
+              <label htmlFor={`prompt-${k}`} className="text-[12px] text-text-2">
                 {p.label}
               </label>
               {p.kind === 'choice' && p.choices ? (
-                <select id={`prompt-${p.variable}`}
+                <select id={`prompt-${k}`}
                         className="rounded-ctl border border-line bg-panel-2 px-2 py-1.5 text-[13px]"
-                        value={answers[p.variable] ?? ''}
-                        onChange={(e) => set(p.variable, e.target.value)}>
+                        value={answers[k] ?? ''}
+                        onChange={(e) => set(k, e.target.value)}>
                   <option value="">Choose…</option>
                   {p.choices.map((c) => <option key={c} value={c}>{c}</option>)}
                 </select>
               ) : (
-                <input id={`prompt-${p.variable}`}
+                <input id={`prompt-${k}`}
                        // Masked because the script author asked for it to be:
                        // either the prompt says so, or the script used
                        // `read -s` to keep it off a terminal.
@@ -78,8 +81,8 @@ export function PromptFields({ prompts, answers, onChange }: {
                        autoComplete={p.sensitive ? 'new-password' : 'off'}
                        className="rounded-ctl border border-line bg-panel-2 px-2 py-1.5 text-[13px]"
                        placeholder={p.default ?? ''}
-                       value={answers[p.variable] ?? ''}
-                       onChange={(e) => set(p.variable, e.target.value)} />
+                       value={answers[k] ?? ''}
+                       onChange={(e) => set(k, e.target.value)} />
               )}
               {p.sensitive && (
                 <span className="text-[11px] text-text-3">
@@ -89,7 +92,8 @@ export function PromptFields({ prompts, answers, onChange }: {
             </>
           )}
         </div>
-      ))}
+        )
+      })}
     </div>
   )
 }

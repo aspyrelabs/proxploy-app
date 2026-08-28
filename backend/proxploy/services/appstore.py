@@ -116,15 +116,19 @@ def _resolve(app, catalog_slug: str, host_id: int):
 # those fall through to `builtin read`, meet the DEVNULL stdin, and behave
 # exactly as they did before this existed.
 READ_SHIM = (
-    'read() { local _a _t=""; for _a in "$@"; do case "$_a" in -*) ;; '
-    '*) _t="$_a" ;; esac; done; '
-    'if [ -n "$_t" ]; then case " ${PXP_ANSWERED:-} " in *" $_t "*) return 0 ;; esac; fi; '
+    'read() { local _a _t="" _c _n _v; '
+    'for _a in "$@"; do case "$_a" in -*) ;; *) _t="$_a" ;; esac; done; '
+    'if [ -n "$_t" ]; then case " ${PXP_ANSWERED:-} " in *" $_t "*) '
+    '_c="PXP_N_$_t"; _n=$(( ${!_c:-0} + 1 )); printf -v "$_c" %s "$_n"; '
+    '_v="PXP_A_${_t}_${_n}"; '
+    'if [ -n "${!_v+x}" ]; then printf -v "$_t" %s "${!_v}"; fi; '
+    'return 0 ;; esac; fi; '
     'builtin read "$@"; }; export -f read; '
 )
 
 
 def apply_answers(ctx: JobContext, env: dict, command: str,
-                  plain: dict, secret: dict) -> str:
+                  plain: dict, secret: dict, prompts: list | None = None) -> str:
     """Put answers in the environment, prefix the shim, return the command.
 
     `secret` values are hidden from every job sink (JobContext.hide); `plain`
@@ -134,9 +138,18 @@ def apply_answers(ctx: JobContext, env: dict, command: str,
     answers = {**plain, **secret}
     if not answers:
         return command
-    for name, value in answers.items():
-        env[str(name)] = str(value)
-    env["PXP_ANSWERED"] = " ".join(str(k) for k in answers)
+    prompts = prompts or []
+    names: set[str] = set()
+    for key, value in answers.items():
+        name, _, index = str(key).rpartition("#")
+        if not name or not index.isdigit() or int(index) >= len(prompts):
+            continue
+        occurrence = installanswers.occurrence_of(prompts, int(index))
+        env[f"PXP_A_{name}_{occurrence}"] = str(value)
+        names.add(name)
+    if not names:
+        return command
+    env["PXP_ANSWERED"] = " ".join(sorted(names))
     ctx.hide(*[str(v) for v in secret.values()])
     # WRAPPED, not prefixed. executor/ssh.py builds `NAME=value ... <command>`,
     # and a shell FUNCTION DEFINITION cannot follow an environment prefix:
@@ -289,7 +302,8 @@ async def run_install(ctx: JobContext, params: dict) -> dict:
     # up a default here however it is shaped.
     plain = {**installanswers.defaults_for(entry.prompts),
              **(params.get("answers") or {})}
-    command = apply_answers(ctx, env, command, plain, secret_answers)
+    command = apply_answers(ctx, env, command, plain, secret_answers,
+                            entry.prompts)
 
     # The script's last words are where it prints the finished URL, so they are
     # kept as they stream rather than read back out of job_events: job_events
@@ -459,6 +473,7 @@ def _resolve_update(app, app_id: int):
              "fingerprint": host.ssh_host_key_fingerprint},
             {"slug": entry.slug, "sha": entry.upstream_sha,
              "script_path": entry.script_path,
+             "prompts": entry.prompts,
              "install_script": pinned_payload_script(entry) or "",
              "from_ref": from_ref},
         )
@@ -684,7 +699,7 @@ async def run_update(ctx: JobContext, params: dict) -> dict:
     # is the reason the rows outlive the install.
     with app.state.sessionmaker() as db:
         stored = installanswers.for_app(db, app.state.secretstore, app_id)
-    command = apply_answers(ctx, env, command, {}, stored)
+    command = apply_answers(ctx, env, command, {}, stored, entry.get("prompts"))
     try:
         status = await executor.run_for_host(
             app.state.sessionmaker, app.state.secretstore, a["host_id"],
