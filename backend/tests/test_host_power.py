@@ -38,6 +38,11 @@ def _app(tmp_path, fail=False):
         db.add(HostCredential(host_id=h.id, kind="api_token:monitoring",
                               encrypted_blob=blob, key_version=ver,
                               public_meta="proxploy@pve!mon"))
+        # Sys.PowerMgmt lives on Lifecycle's role, so powering a node needs
+        # that token, not the read-only one.
+        db.add(HostCredential(host_id=h.id, kind="api_token:lifecycle",
+                              encrypted_blob=blob, key_version=ver,
+                              public_meta="proxploy@pve!life"))
         db.commit()
         return app, c, fake, h.id
 
@@ -129,6 +134,8 @@ def test_reboot_job_actually_reboots_the_node_and_reaches_a_terminal_status(tmp_
                 {"token_id": "proxploy@pve!mon", "token_secret": "s"}).encode())
             db.add(HostCredential(host_id=h.id, kind="api_token:monitoring",
                                   encrypted_blob=blob, key_version=ver))
+            db.add(HostCredential(host_id=h.id, kind="api_token:lifecycle",
+                                  encrypted_blob=blob, key_version=ver))
             db.commit()
             job_id = backend.enqueue(
                 db, kind="host.reboot", target_type="host", target_id=h.id,
@@ -169,6 +176,8 @@ def test_power_off_job_calls_proxmox_with_shutdown_and_succeeds(tmp_path):
             blob, ver = app.state.secretstore.encrypt(json.dumps(
                 {"token_id": "proxploy@pve!mon", "token_secret": "s"}).encode())
             db.add(HostCredential(host_id=h.id, kind="api_token:monitoring",
+                                  encrypted_blob=blob, key_version=ver))
+            db.add(HostCredential(host_id=h.id, kind="api_token:lifecycle",
                                   encrypted_blob=blob, key_version=ver))
             db.commit()
             job_id = backend.enqueue(
@@ -223,6 +232,8 @@ def test_a_power_off_never_asks_proxmox_for_the_log_of_a_task_it_did_not_start(
             blob, ver = app.state.secretstore.encrypt(json.dumps(
                 {"token_id": "proxploy@pve!mon", "token_secret": "s"}).encode())
             db.add(HostCredential(host_id=h.id, kind="api_token:monitoring",
+                                  encrypted_blob=blob, key_version=ver))
+            db.add(HostCredential(host_id=h.id, kind="api_token:lifecycle",
                                   encrypted_blob=blob, key_version=ver))
             db.commit()
             job_id = backend.enqueue(
@@ -280,6 +291,8 @@ def test_reboot_job_reports_no_fake_progress(tmp_path, monkeypatch):
                 {"token_id": "proxploy@pve!mon", "token_secret": "s"}).encode())
             db.add(HostCredential(host_id=h.id, kind="api_token:monitoring",
                                   encrypted_blob=blob, key_version=ver))
+            db.add(HostCredential(host_id=h.id, kind="api_token:lifecycle",
+                                  encrypted_blob=blob, key_version=ver))
             db.commit()
             job_id = backend.enqueue(
                 db, kind="host.reboot", target_type="host", target_id=h.id,
@@ -312,6 +325,8 @@ def test_a_proxmox_error_fails_the_job_rather_than_ending_the_request(tmp_path):
             blob, ver = app.state.secretstore.encrypt(json.dumps(
                 {"token_id": "proxploy@pve!mon", "token_secret": "s"}).encode())
             db.add(HostCredential(host_id=h.id, kind="api_token:monitoring",
+                                  encrypted_blob=blob, key_version=ver))
+            db.add(HostCredential(host_id=h.id, kind="api_token:lifecycle",
                                   encrypted_blob=blob, key_version=ver))
             db.commit()
             job_id = backend.enqueue(
@@ -482,6 +497,8 @@ def test_a_missing_node_power_privilege_names_it_and_how_to_grant_it(tmp_path):
             blob, ver = app.state.secretstore.encrypt(json.dumps(
                 {"token_id": "proxploy@pve!mon", "token_secret": "t0k3n-99xz"}).encode())
             db.add(HostCredential(host_id=h.id, kind="api_token:monitoring",
+                                  encrypted_blob=blob, key_version=ver))
+            db.add(HostCredential(host_id=h.id, kind="api_token:lifecycle",
                                   encrypted_blob=blob, key_version=ver))
             db.commit()
             job_id = backend.enqueue(

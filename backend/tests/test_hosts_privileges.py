@@ -170,21 +170,24 @@ def test_enrolment_records_node_power_missing_on_the_host(tmp_path, csrf_header,
                    headers=csrf_header(c))
         assert r.status_code == 201, r.text
 
+        # Unknown at enrolment, not True: Sys.PowerMgmt rides on Lifecycle's
+        # role and no lifecycle token has been stored yet, so the monitoring
+        # token cannot answer for it either way.
         app = c.app
         with app.state.sessionmaker() as db:
             h = db.query(Host).one()
-            assert h.node_power_missing is True
+            assert h.node_power_missing is None
 
         detail = c.get(f"/api/v1/hosts/{r.json()['id']}").json()
-        assert detail["node_power_missing"] is True
+        assert detail["node_power_missing"] is None
 
 
 def test_an_existing_token_missing_node_power_still_enrols_cleanly_and_keeps_everything_else(
         tmp_path, csrf_header, bootstrap_admin):
     """node_power_missing is informational, never a refusal: a token with a
-    perfectly good monitoring grant (everything that worked before this
-    feature existed) must enrol exactly as it always did, only now also
-    telling the operator node power specifically is unavailable."""
+    perfectly good monitoring grant must enrol exactly as it always did, and
+    say nothing either way about a privilege that lives on a token this host
+    has not been given yet."""
     perms = {"/": {"Sys.Audit": 1, "VM.Audit": 1, "Datastore.Audit": 1,
                    "Pool.Audit": 1, "SDN.Audit": 1}}
     c = _client(tmp_path, permissions=perms)
@@ -195,13 +198,14 @@ def test_an_existing_token_missing_node_power_still_enrols_cleanly_and_keeps_eve
         assert r.status_code == 201, r.text
         assert r.json()["missing_privileges"] == []
         assert r.json()["status"] == "connected"
-        assert r.json()["node_power_missing"] is True
+        assert r.json()["node_power_missing"] is None
 
 
 def test_the_test_endpoint_rechecks_node_power(tmp_path, csrf_header, bootstrap_admin):
-    """POST /hosts/{id}/test re-probes the live token, the same as it already
-    does for reachability: granting Sys.PowerMgmt after enrolment and then
-    testing again must flip node_power_missing to False without re-enrolling."""
+    """POST /hosts/{id}/test re-probes, the same as it already does for
+    reachability. With no lifecycle token stored there is nothing that could
+    power the node, and the answer is a plain "missing" rather than the
+    monitoring token's opinion."""
     from tests.fakes.pve import FakePVE
     from tests.support import make_app
     from fastapi.testclient import TestClient
@@ -214,19 +218,16 @@ def test_the_test_endpoint_rechecks_node_power(tmp_path, csrf_header, bootstrap_
         r = c.post("/api/v1/hosts", json={**PROBE, "name": "pve-01"},
                    headers=csrf_header(c))
         host_id = r.json()["id"]
-        assert r.json()["node_power_missing"] is True
+        assert r.json()["node_power_missing"] is None
 
-        # Grant it, as if the operator had just run the extra pveum commands.
-        # No clean setter exists on this test double: `_fail` above is the
-        # same idiom, reaching past the leaf's own attribute name.
         fake.access.permissions._value = {"/": {"Sys.PowerMgmt": 1}}
 
         r2 = c.post(f"/api/v1/hosts/{host_id}/test", headers=csrf_header(c))
         assert r2.status_code == 200, r2.text
-        assert r2.json()["node_power_missing"] is False
+        assert r2.json()["node_power_missing"] is True
 
         detail = c.get(f"/api/v1/hosts/{host_id}").json()
-        assert detail["node_power_missing"] is False
+        assert detail["node_power_missing"] is True
 
 
 # --- capability gaps: every token against its OWN role ----------------------

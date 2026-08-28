@@ -184,6 +184,14 @@ def _node_power_missing(client) -> bool | None:
     return NODE_POWER_PRIVILEGE not in granted
 
 
+def _lifecycle_power_missing(app, db, host) -> bool | None:
+    try:
+        client = client_for_host(app, db, host, capability="lifecycle")
+    except Exception:  # noqa: BLE001  (no lifecycle token, or it will not build)
+        return True
+    return _node_power_missing(client)
+
+
 def _capability_state(kinds) -> dict[str, bool]:
     """Which capability tokens this host holds. Presence only.
 
@@ -211,11 +219,6 @@ class TokenScriptIn(BaseModel):
     capabilities: list[str] = []
     path: str = "/"
     node_shell: bool = False
-    # Independent of `capabilities` (services/pveum.py's own docstring on
-    # NODE_POWER_PRIVILEGE): Sys.PowerMgmt gets its own role and token, not an
-    # augmentation of Lifecycle's, and is not conditional on Lifecycle being
-    # among `capabilities`.
-    node_power: bool = False
 
 
 @router.post("/token-script")
@@ -228,8 +231,7 @@ def token_script(body: TokenScriptIn, user: User = Depends(_manage_global)):
     """
     try:
         script = generate_script(body.capabilities, path=body.path,
-                                 node_shell=body.node_shell,
-                                 node_power=body.node_power)
+                                 node_shell=body.node_shell)
     except ValueError as e:
         raise HTTPException(422, str(e)) from e
     return {"script": script,
@@ -283,7 +285,10 @@ def create_host(request: Request, body: HostIn, db=Depends(get_db),
     # a bare "unreachable". Recorded rather than refused: an under-privileged
     # token is still worth enrolling.
     missing = _missing_privileges(client)
-    node_power_missing = _node_power_missing(client)
+    # None, not a probe of the monitoring token: Sys.PowerMgmt lives on
+    # Lifecycle's role now, and no lifecycle token has been stored yet at
+    # enrolment. The refresh below fills this in once one exists.
+    node_power_missing = None
     try:
         node_name, cluster_name = cluster_identity(client)
     except ProxmoxError:  # enrolment must survive a probe hiccup
@@ -597,9 +602,10 @@ def test_host(request: Request, host_id: int, db=Depends(get_db),
                                factory=request.app.state.proxmox_factory)
         v = client.version()
         h.status, h.pve_version, h.last_seen_at = "connected", v.get("version"), utcnow()
-        # Re-checked here so an operator who just ran the extra pveum commands
-        # for node power sees it now, not only at the next full enrolment.
-        h.node_power_missing = _node_power_missing(client)
+        # Probed on the LIFECYCLE token, which is where Sys.PowerMgmt lives.
+        # A host with no lifecycle token cannot power the node either way, and
+        # says so rather than leaving the last answer standing.
+        h.node_power_missing = _lifecycle_power_missing(request.app, db, h)
         # A host that answers /version perfectly can still be unable to accept
         # a single write, which is what quorum loss looks like from here. Best
         # effort: a token that cannot read /cluster/status leaves the previous
@@ -1350,7 +1356,7 @@ def enrol_peers(request: Request, host_id: int, body: PeerEnrolIn,
                     # outside it. A teamless origin leaves the peer teamless.
                     team_id=h.team_id,
                     last_error=_privilege_note(_missing_privileges(peer_client)),
-                    node_power_missing=_node_power_missing(peer_client),
+                    node_power_missing=None,
                     pve_version=v.get("version"), last_seen_at=utcnow())
         db.add(peer)
         db.commit()

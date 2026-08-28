@@ -93,9 +93,10 @@ async def run_host_power(ctx: JobContext, params: dict) -> dict:
     host_id = int(params["host_id"])
     node = str(params["node"])
     command = str(params["command"])
-    # Deliberately the "monitoring" default, not "lifecycle": node power is its
-    # own capability dimension.
-    client, host_name = await asyncio.to_thread(_resolve_host, app, host_id)
+    # Lifecycle, which is where Sys.PowerMgmt lives: taking the node down is
+    # managing the machine, and the monitoring token is read-only.
+    client, host_name = await asyncio.to_thread(_resolve_host, app, host_id,
+                                                "lifecycle")
     verb = "rebooting" if command == "reboot" else "powering off"
     ctx.log(f"{verb} node {node} ({host_name})")
     upid = await asyncio.to_thread(client.node_power, node, command)

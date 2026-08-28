@@ -110,7 +110,8 @@ function FieldInfo({ label, body }: { label: string; body: React.ReactNode }) {
   )
 }
 
-const BAND = 'border-t border-line-soft pt-3 text-[11px] uppercase tracking-wide text-text-3'
+const BOX = 'space-y-3 rounded-card border border-line-soft bg-panel-2 p-4'
+const BAND = 'text-[11px] uppercase tracking-wide text-text-3'
 
 export function HostForm({ onCreated }: { onCreated: (h: HostCreated) => void }) {
   const qc = useQueryClient()
@@ -123,10 +124,6 @@ export function HostForm({ onCreated }: { onCreated: (h: HostCreated) => void })
   const [probe, setProbe] = useState('')
   const [missing, setMissing] = useState<string[] | null>(null)
   const [caps, setCaps] = useState<string[]>(['lifecycle', 'console', 'backup'])
-  // Off by default: Sys.PowerMgmt can take the whole node down, so it is
-  // never on unless the operator explicitly ticks it. Independent of `caps`
-  // — Reboot/Power off is offered on every host regardless.
-  const [nodePower, setNodePower] = useState(false)
   // One token per capability the operator ticked above. Keyed by capability
   // so the retry path can tell which one the node rejected.
   const [capTokens, setCapTokens] =
@@ -211,6 +208,7 @@ export function HostForm({ onCreated }: { onCreated: (h: HostCreated) => void })
 
   return (
     <form onSubmit={submit} className="mt-4 space-y-3">
+      <div className={BOX}>
       {([['name', 'Name', 'pve-01'], ['address', 'Address', 'https://10.0.0.5:8006']] as const)
         .map(([k, label, ph]) => (
         <div key={k}>
@@ -224,6 +222,9 @@ export function HostForm({ onCreated }: { onCreated: (h: HostCreated) => void })
         <input type="checkbox" checked={f.verify_tls}
           onChange={e => set('verify_tls', e.target.checked)} /> Verify TLS certificate
       </label>
+      </div>
+
+      <div className={BOX}>
       <h3 className={BAND}>API access token</h3>
       {/* One box for all four capability tokens. Monitoring is mandatory and
               creates the host, so its row always renders; the other three are
@@ -268,7 +269,6 @@ export function HostForm({ onCreated }: { onCreated: (h: HostCreated) => void })
                   All four are visible once the host exists. */}
         <div className="mt-3 space-y-3 border-t border-line-soft pt-3">
           <h3 className="text-[11px] uppercase tracking-wide text-text-3">Tokens</h3>
-          <HostScriptPanel capabilities={caps} nodeShell={f.ssh_enroll} nodePower={nodePower} />
           {/* flex-wrap is load-bearing: FieldInfo's explanation is basis-full so
               it drops onto its own line under the label. Without wrapping it
               squeezes alongside and the label collapses into a column. */}
@@ -334,20 +334,10 @@ export function HostForm({ onCreated }: { onCreated: (h: HostCreated) => void })
             </>
           )}
         </div>
-        {/* Independent of the capability row above: Sys.PowerMgmt gets its own
-                  role and token, not a widening of Lifecycle's, and Reboot/Power
-                  off is offered on every host regardless of which capabilities
-                  were chosen. */}
-        <label className="mt-1.5 flex items-start gap-1.5 text-[11.5px] text-text-2">
-          <input type="checkbox" checked={nodePower} className="mt-0.5"
-            onChange={e => setNodePower(e.target.checked)} />
-          <span>Node power (reboot/power off this host).
-            <span className="block text-[11px] text-text-3">
-              Can take down every guest it runs, and Proxploy itself if it runs here.
-            </span>
-          </span>
-        </label>
       </div>
+      </div>
+
+      <HostScriptPanel capabilities={caps} nodeShell={f.ssh_enroll} />
 
       <div className="rounded-ctl border border-line-soft bg-elev p-3">
         <p className="text-[12px] text-text-2">{CONSENT_COPY}</p>
