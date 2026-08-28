@@ -5,7 +5,7 @@ import { notify } from '../lib/notify'
 import { Icon } from './ui/icon'
 import { Skeleton, SkeletonGroup } from './ui/skeleton'
 
-export const TIER_BADGE_PX = 18
+export const TIER_BADGE_PX = 16
 export const TIER_MARKER_PX = 16
 
 type TierSpec = { label: string; icon: string; tone: string; box: string }
@@ -71,7 +71,7 @@ export function TierPill() {
   if (isPending) {
     return (
       <SkeletonGroup label="Checking your plan" className="shrink-0">
-        <Skeleton className="h-[28px] w-[83px] rounded-ctl" />
+        <Skeleton className="h-[26px] w-[76px] rounded-ctl" />
       </SkeletonGroup>
     )
   }
