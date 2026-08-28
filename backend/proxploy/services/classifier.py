@@ -192,10 +192,13 @@ SENSITIVE_PROMPT_RE = re.compile(
 CHOICES_RE = re.compile(r"[(\[<](\w{1,3}(?:/\w{1,3}){1,3})[)\]>]")
 # A yes/no prompt, and which way it defaults: upstream writes the default as
 # the capitalised letter, so "[y/N]" declines and "[Y/n]" accepts.
-YESNO_RE = re.compile(r"[\[(<]\s*(y/n|yes/no)\s*[\])>]", re.I)
+YESNO_RE = re.compile(r"(?:[\[(<]\s*(y/n|yes/no)\s*[\])>]|\b(y/n|yes/no)\s*\??\s*$)", re.I)
 # Checked AFTER YESNO_RE, or "[y/N]" is read as a default literally spelled
 # "y/N" and offered to the operator as if it were a value.
 DEFAULT_RE = re.compile(r"\[([^\[\]]{1,24})\]\s*:?\s*$")
+# Upstream says it in words as often as in brackets: "Enter your choice
+# [1-4] (default: 1):" states one, and the bracket there is the range.
+DEFAULT_WORD_RE = re.compile(r"\(\s*default\s*[:=]\s*([^)]{1,24})\)", re.I)
 
 
 # A prompt whose answer can ABORT the run: an `exit` guarded by the prompt's
@@ -313,10 +316,11 @@ def extract_prompts(install_script: str) -> list[dict]:
             # The capitalised side is upstream's own default. Declining is also
             # the safe answer when it is ambiguous: these prompts gate OPTIONAL
             # extras, so "no" installs strictly less.
-            default = "y" if yesno.group(1)[0].isupper() else "n"
+            offer = yesno.group(1) or yesno.group(2)
+            default = "y" if offer[0].isupper() else "n"
         else:
-            m2 = DEFAULT_RE.search(text)
-            default = m2.group(1) if m2 else None
+            m2 = DEFAULT_WORD_RE.search(text) or DEFAULT_RE.search(text)
+            default = m2.group(1).strip() if m2 else None
             if default is None and OPTIONAL_TEXT_RE.search(text):
                 default = ""
         window = "\n".join(lines[i + 1:i + 1 + GATE_WINDOW])
