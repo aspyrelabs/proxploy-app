@@ -51,13 +51,13 @@ function StatCard({ label, value, note, loading }: {
       <div className="text-[11px] uppercase tracking-wide text-text-3">{label}</div>
       {loading ? (
         <SkeletonGroup label={`Loading ${label.toLowerCase()}`}>
-          <SkeletonLine className="mt-1 w-32 text-[20px]" />
-          <SkeletonLine className="mt-2 w-48 max-w-full text-[12px]" />
+          <SkeletonLine className="mt-1 w-32 text-[24px]" />
+          <SkeletonLine className="mt-2 w-48 max-w-full text-[13px]" />
         </SkeletonGroup>
       ) : (
         <>
-          <div className="mt-1 font-mono text-[20px] text-text">{value}</div>
-          <div className="mt-2 text-[12px] text-text-3">{note}</div>
+          <div className="mt-1 font-mono text-[24px] text-text">{value}</div>
+          <div className="mt-2 text-[13px] text-text-3">{note}</div>
         </>
       )}
     </div>
@@ -577,7 +577,7 @@ export function BackupsPage() {
                     store, what's knowable is whether the RUNS finished — an
                     archive was written, never that it restores. */}
         {stats?.success_rate_30d != null ? (
-          <StatCard label="Verified · 30d" loading={isPending}
+          <StatCard label="Backup Integrity · 30d" loading={isPending}
             value={fmtPct(stats.success_rate_30d)}
             note={`${stats.ok_count} verified · ${stats.failed_count} failed`} />
         ) : (

@@ -177,7 +177,7 @@ describe('BackupsPage', () => {
     expect(screen.getByText('Next scheduled')).toBeInTheDocument()
     expect(screen.getByText('Datastore used')).toBeInTheDocument()
     // The verified card, because this fixture's archives carry a verify_state.
-    expect(screen.getByText('Verified · 30d')).toBeInTheDocument()
+    expect(screen.getByText('Backup Integrity · 30d')).toBeInTheDocument()
     expect(screen.getByText('50%')).toBeInTheDocument()
     expect(screen.getByText('Immich')).toBeInTheDocument()
     expect(screen.getByText('win11')).toBeInTheDocument()
@@ -652,7 +652,7 @@ describe('the success card without PBS verification', () => {
     expect(await screen.findByText('88%')).toBeInTheDocument()   // fmtPct rounds
     expect(screen.getByText(/7 finished · 1 failed/)).toBeInTheDocument()
     expect(screen.getByText(/Nothing checks that an archive can be restored/)).toBeInTheDocument()
-    expect(screen.queryByText('Verified · 30d')).toBeNull()
+    expect(screen.queryByText('Backup Integrity · 30d')).toBeNull()
     BACKUPS.stats.success_rate_30d = verified
   })
 })
