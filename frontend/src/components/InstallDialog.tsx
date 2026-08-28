@@ -9,7 +9,8 @@ import { CoreFields, type CoreFieldsValue } from './install/CoreFields'
 import { knownPool, useStoragePools } from './install/pools'
 import { StorageFields } from './install/StorageFields'
 import { JobLog } from './JobLog'
-import { Button } from './ui/button'
+import { Button, segment } from './ui/button'
+import { IconTile } from './IconTile'
 import { Dialog } from './ui/dialog'
 import { Loading } from './ui/loading'
 import { Skeleton, SkeletonGroup, SkeletonLine } from './ui/skeleton'
@@ -31,6 +32,8 @@ type HostRow = {
   // shown while this is null.
   install_consent_at?: string | null
 }
+
+const MODES = [['default', 'Default'], ['advanced', 'Advanced']] as const
 
 export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => void }) {
   const { data: entry, isError: entryFailed } = useCatalogEntry(slug)
@@ -220,7 +223,16 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
        mid-line, where the useful part lives: the finished URL, the port, and
        whatever went wrong. max() keeps it from ever being NARROWER than the
        form. */
-    <Dialog title={<>Install {entry.name ?? slug}</>}
+    <Dialog title={
+              <span className="flex items-center gap-2.5">
+                <IconTile name={entry.name ?? slug} iconUrl={entry.icon_url} size={32} />
+                <span className="flex min-w-0 flex-col leading-tight">
+                  <span className="truncate">Install {entry.name ?? slug}</span>
+                  <span className="truncate font-mono text-[11px] font-normal text-text-3">
+                    {slug} · community-scripts.org
+                  </span>
+                </span>
+              </span>}
             width={jobId ? 'max(520px, 60vw)' : 520} onClose={onClose}>
 
     {jobId ? (
@@ -245,28 +257,22 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
     ) : (
       <>
         <div className="mt-4 space-y-3">
-          <div className="space-y-2">
-            <label className="flex items-start gap-2 text-[13px] text-text-2">
-              <input type="radio" name="install-mode" className="mt-0.5" checked={mode === 'default'}
-                onChange={() => setMode('default')} />
-              <span>
-                <span className="text-text">Default</span>
-                <span className="block text-[12px] text-text-3">
-                  Installs with {entry.name ?? slug}&rsquo;s own defaults.
-                </span>
-              </span>
-            </label>
-            <label className="flex items-start gap-2 text-[13px] text-text-2">
-              <input type="radio" name="install-mode" className="mt-0.5" checked={mode === 'advanced'}
-                onChange={() => setMode('advanced')} />
-              <span>
-                <span className="text-text">Advanced</span>
-                <span className="block text-[12px] text-text-3">
-                  Customize resources, OS, storage and more before install.
-                </span>
-              </span>
-            </label>
+          <div className="inline-flex overflow-hidden rounded-ctl border border-line">
+            {MODES.map(([value, word]) => (
+              <button key={value} type="button" aria-pressed={mode === value}
+                onClick={() => setMode(value)}
+                className={`px-3 py-1 text-[12px] ${segment(mode === value)}`}>
+                {word}
+              </button>
+            ))}
           </div>
+          <p className="text-[12px] text-text-3">
+            {mode === 'default'
+              ? `Installs with ${entry.name ?? slug}'s own defaults.`
+              : 'Customize resources, OS and storage before install.'}
+          </p>
+          <h3 className="border-t border-line-soft pt-3 text-[11px] uppercase
+                         tracking-wide text-text-3">Destination</h3>
           <select className="w-full rounded-ctl border border-line bg-panel px-3 py-1.5 text-[13px]"
             aria-label="Host"
             value={hostId ?? ''} disabled={hosts.isError || hosts.isLoading}
@@ -300,9 +306,14 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
               placeholder="jellyfin-prod" value={name}
               onChange={(e) => setName(e.target.value)} />
           </div>
-          <input className="w-full rounded-ctl border border-line bg-panel px-3 py-1.5 text-[13px]"
-            placeholder="Container ID (CTID)" value={ctid}
-            onChange={(e) => setCtid(e.target.value)} />
+          <div>
+            <label className="mb-1 block text-[11px] uppercase tracking-wide text-text-3"
+              htmlFor="install-ctid">Container ID</label>
+            <input id="install-ctid"
+              className="w-full rounded-ctl border border-line bg-panel px-3 py-1.5 text-[13px]"
+              placeholder="Leave blank to take the next free id" value={ctid}
+              onChange={(e) => setCtid(e.target.value)} />
+          </div>
           {/* Nothing recorded at all means no box, not an empty one. Default
               mode only: this is the APP's own script-parsed defaults, while
               Advanced mode's CoreFields shows the fields that actually decide
@@ -369,16 +380,19 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
             </div>
           )}
           <PromptFields prompts={prompts} answers={answers} onChange={setAnswers} />
-          <div className="text-[12px] text-text-2">
-            This installs and executes a community-scripts.org script on the target node,
-            exactly as if you ran it yourself.
+          <div className="rounded-ctl border border-line-soft bg-elev p-3">
+            <p className="text-[12px] text-text-2">
+              This runs a community-scripts.org script on {installTarget ?? 'the node'},
+              exactly as if you ran it yourself.
+            </p>
+            {needsConsent && (
+              <label className="mt-2 flex items-center gap-2 text-[12px] text-text">
+                <input type="checkbox" checked={consent}
+                  onChange={(e) => setConsent(e.target.checked)} />
+                I understand this runs as root on the node
+              </label>
+            )}
           </div>
-          {needsConsent && (
-            <label className="flex items-center gap-2 text-[12px] text-text-2">
-              <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
-              I understand this runs as root on the node
-            </label>
-          )}
         </div>
         <div className="mt-4 flex justify-end gap-2">
           <Button variant="ghost" onClick={onClose}>Cancel</Button>

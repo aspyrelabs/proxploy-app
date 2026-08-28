@@ -64,8 +64,8 @@ async function mockStorage(rows: StorageRow[] = DEFAULT_STORAGE, hosts: HostRow[
 }
 
 async function openAdvanced() {
-  await waitFor(() => expect(screen.getByRole('radio', { name: /advanced/i })).toBeInTheDocument())
-  fireEvent.click(screen.getByRole('radio', { name: /advanced/i }))
+  await waitFor(() => expect(screen.getByRole('button', { name: /^advanced$/i })).toBeInTheDocument())
+  fireEvent.click(screen.getByRole('button', { name: /^advanced$/i }))
   // The pickers need a target host to filter pools for; select the first one.
   fireEvent.change(screen.getByRole('combobox', { name: /host/i }), { target: { value: '1' } })
 }
@@ -107,7 +107,7 @@ function capturedSubmit() {
  *  them and an unset picker is a valid, honest "let the backend decide". */
 async function fillEveryField() {
   fireEvent.change(screen.getByLabelText(/app name/i), { target: { value: 'redis-1' } })
-  fireEvent.change(screen.getByPlaceholderText('Container ID (CTID)'), { target: { value: '150' } })
+  fireEvent.change(screen.getByLabelText('Container ID'), { target: { value: '150' } })
   // Exact matches, not regexes: the Advanced radio's own subtitle copy
   // ("Customize vCPU, RAM, disk, storage and more...") contains these same
   // words inside its wrapping <label>, so a case-insensitive substring match
@@ -130,7 +130,7 @@ async function startInstall() {
   await waitFor(() => expect(screen.getByText(/runs as root on/i)).toBeInTheDocument())
   fireEvent.change(screen.getByRole('combobox'), { target: { value: '1' } })
   fireEvent.change(screen.getByLabelText(/app name/i), { target: { value: 'redis-1' } })
-  fireEvent.change(screen.getByPlaceholderText('Container ID (CTID)'), { target: { value: '105' } })
+  fireEvent.change(screen.getByLabelText('Container ID'), { target: { value: '105' } })
   fireEvent.click(screen.getByRole('checkbox'))
   fireEvent.click(screen.getByRole('button', { name: 'Install' }))
 }
@@ -162,7 +162,7 @@ describe('InstallDialog', () => {
     // Fill host/name/ctid, button must stay disabled until consent is also checked.
     fireEvent.change(screen.getByRole('combobox'), { target: { value: '1' } })
     fireEvent.change(screen.getByLabelText(/app name/i), { target: { value: 'redis-1' } })
-    fireEvent.change(screen.getByPlaceholderText('Container ID (CTID)'), { target: { value: '105' } })
+    fireEvent.change(screen.getByLabelText('Container ID'), { target: { value: '105' } })
     expect(installBtn).toBeDisabled()
 
     fireEvent.click(screen.getByRole('checkbox'))
@@ -187,13 +187,14 @@ describe('InstallDialog', () => {
     })
 
     renderDialog()
-    await waitFor(() => expect(screen.getByRole('radio', { name: /default/i })).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('button', { name: /^default$/i })).toBeInTheDocument())
 
     // Default asks nothing that has an honest default: no expanded block yet.
-    expect(screen.getByRole('radio', { name: /default/i })).toBeChecked()
+    expect(screen.getByRole('button', { name: /^default$/i }))
+      .toHaveAttribute('aria-pressed', 'true')
     expect(screen.queryByText('Container customization')).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('radio', { name: /advanced/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^advanced$/i }))
     expect(screen.getByText('Container customization')).toBeInTheDocument()
   })
 
@@ -217,7 +218,7 @@ describe('InstallDialog', () => {
 
     // No CTID typed, and Install is still enabled: blank means the node
     // assigns the next free id (InstallIn.ctid).
-    expect(screen.getByPlaceholderText('Container ID (CTID)')).toHaveValue('')
+    expect(screen.getByLabelText('Container ID')).toHaveValue('')
     expect(screen.getByRole('button', { name: 'Install' })).toBeEnabled()
   })
 
@@ -650,7 +651,7 @@ describe('InstallDialog', () => {
     expect(screen.queryByText(/MB RAM/)).not.toBeInTheDocument()
     expect(screen.queryByText(/GB disk/)).not.toBeInTheDocument()
     // Nothing to say means no box at all, not an empty one.
-    expect(document.querySelector('.font-mono')).toBeNull()
+    expect(document.querySelector('.bg-elev.font-mono')).toBeNull()
   })
 
   it('drops the missing defaults and their separators, keeping the ones it has', async () => {
@@ -674,10 +675,10 @@ describe('InstallDialog', () => {
     await waitFor(() => expect(screen.getByRole('combobox', { name: /host/i })).toBeInTheDocument())
     expect(screen.getByText('1 vCPU · 512MB RAM · 2GB disk · debian 13')).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('radio', { name: /advanced/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^advanced$/i }))
     expect(screen.queryByText('1 vCPU · 512MB RAM · 2GB disk · debian 13')).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('radio', { name: /default/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^default$/i }))
     expect(screen.getByText('1 vCPU · 512MB RAM · 2GB disk · debian 13')).toBeInTheDocument()
   })
 

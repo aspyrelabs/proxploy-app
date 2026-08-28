@@ -21,7 +21,9 @@ const YES_NO = [['y', 'Yes'], ['n', 'No']] as const
 /** The question without its shell syntax: the control states the options now,
  *  so a trailing `<y/N>` or `[y/N]` is the script's punctuation, not ours. */
 function askedAs(label: string): string {
-  return label.replace(/\s*[<[(][yY]\s*\/\s*[nN][>\])]\s*:?\s*$/, '').trim()
+  return label.replace(/\s*<[^<>]{1,12}>\s*:?\s*$/, '')
+              .replace(/\s*\[[yY]\s*\/\s*[nN]\]\s*:?\s*$/, '')
+              .trim()
 }
 
 export function PromptFields({ prompts, answers, onChange }: {
@@ -33,10 +35,13 @@ export function PromptFields({ prompts, answers, onChange }: {
   const set = (k: string, v: string) => onChange({ ...answers, [k]: v })
 
   return (
-    <div className="flex flex-col gap-3">
-      <div className="text-[12px] font-semibold text-text-2">
-        This app's installer asks {prompts.length === 1 ? 'a question' : 'some questions'}
-      </div>
+    <section className="border-l-2 border-amber/50 pl-3">
+      <h3 className="text-[11px] uppercase tracking-wide text-amber">The installer asks</h3>
+      <p className="mb-3 mt-0.5 text-[11.5px] text-text-3">
+        {prompts.length === 1 ? 'This question comes' : 'These questions come'} from the
+        install script itself, word for word.
+      </p>
+      <div className="flex flex-col gap-3">
 
       {prompts.map((p, i) => {
         const k = answerKey(p, i)
@@ -79,7 +84,7 @@ export function PromptFields({ prompts, answers, onChange }: {
           ) : (
             <>
               <label htmlFor={`prompt-${k}`} className="text-[12px] text-text-2">
-                {p.label}
+                {askedAs(p.label)}
               </label>
               {p.kind === 'choice' && p.choices ? (
                 <select id={`prompt-${k}`}
@@ -111,6 +116,7 @@ export function PromptFields({ prompts, answers, onChange }: {
         </div>
         )
       })}
-    </div>
+      </div>
+    </section>
   )
 }
