@@ -1127,7 +1127,7 @@ def guest_refs(request: Request, db, host: Host, kind: str, vmid: int, row,
 def guest_log(request: Request, db, host: Host, kind: str, vmid: int, row, *,
               start: int, limit: int, since: int | None, until: int | None):
     try:
-        lines = fw.readers(request.app, db, host).firewall_log(
+        lines = fw.guest_log_reader(request.app, db, host).firewall_log(
             scope_object_or_404(fw.guest_loc(host, kind, vmid, row), "log"),
             start=start, limit=limit, since=since, until=until)
     except ProxmoxError as e:

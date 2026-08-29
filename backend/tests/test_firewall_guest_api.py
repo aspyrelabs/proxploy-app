@@ -17,7 +17,10 @@ def _seed(app):
                     node_name="pve1", status="connected")
         db.add(host)
         db.commit()
-        for cap in ("monitoring", "lifecycle"):
+        # console too: a GUEST firewall log needs VM.Console, which PVE
+        # gates it behind rather than VM.Audit, so it reads on the
+        # console credential (services/firewall.py::guest_log_reader).
+        for cap in ("monitoring", "lifecycle", "console"):
             blob, ver = app.state.secretstore.encrypt(json.dumps(
                 {"token_id": f"proxploy@pve!fw-{cap}",
                  "token_secret": "s3cret"}).encode())

@@ -37,7 +37,10 @@ PASSWORD = "Correct-Horse-Battery-9"
 
 
 def _creds(app, db, host_id):
-    for cap in ("monitoring", "lifecycle"):
+    # console too: a GUEST firewall log needs VM.Console, which PVE
+    # gates it behind rather than VM.Audit, so it reads on the
+    # console credential (services/firewall.py::guest_log_reader).
+    for cap in ("monitoring", "lifecycle", "console"):
         blob, ver = app.state.secretstore.encrypt(json.dumps(
             {"token_id": f"proxploy@pve!fw-{cap}",
              "token_secret": "s3cret"}).encode())
@@ -867,6 +870,12 @@ def _raise_from_pve(monkeypatch, exc):
     import proxploy.services.firewall as fwsvc
     monkeypatch.setattr(fwsvc, "writers", lambda *a, **kw: _Boom(exc))
     monkeypatch.setattr(fwsvc, "readers", lambda *a, **kw: _Boom(exc))
+    # guest_log_reader is a THIRD client, not a variant of readers: PVE gates a
+    # guest's firewall log behind VM.Console, so it goes through the console
+    # credential. Patching only the first two left those two routes reaching a
+    # working fake and answering 200 while every other read relayed the
+    # failure, which is a walk that covers a route without testing it.
+    monkeypatch.setattr(fwsvc, "guest_log_reader", lambda *a, **kw: _Boom(exc))
 
 
 def _wrapped(raw):

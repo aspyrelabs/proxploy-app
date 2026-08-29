@@ -110,7 +110,11 @@ def rig(tmp_path_factory):
     if src is None:
         pytest.skip("no enrolled host in the dev database")
     tokens = {}
-    for cap in ("monitoring", "lifecycle"):
+    # console is needed for the guest firewall log, which PVE gates behind
+    # VM.Console rather than VM.Audit. Without it that one route answers "no
+    # console API token configured" while every other read works, which reads
+    # as a broken route rather than a fixture that copied two of three tokens.
+    for cap in ("monitoring", "lifecycle", "console"):
         cred = dev.query(HostCredential).filter_by(
             host_id=src.id, kind=f"api_token:{cap}").one_or_none()
         if cred is None:

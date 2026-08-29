@@ -116,6 +116,25 @@ def readers(app, db, host: Host):
     return client_for_host(app, db, host, capability="monitoring")
 
 
+def guest_log_reader(app, db, host: Host):
+    """The one firewall READ that monitoring cannot do.
+
+    PVE gates a GUEST's firewall log behind VM.Console rather than VM.Audit,
+    unlike every other read in this file, which is why `readers` above 403s on
+    it. Measured on 2026-08-29 against a correctly scoped install: 403
+    (/vms/100, VM.Console) on monitoring, and the same call succeeds on the
+    console token.
+
+    The privilege is NOT added to ProxployAudit to make `readers` work. That
+    would give the read-only token console access to every guest on the node,
+    which is the separation the capability split exists to keep.
+
+    A host with no console token configured raises CapabilityNotConfigured, the
+    same as any other capability this product asks for and does not have.
+    """
+    return client_for_host(app, db, host, capability="console")
+
+
 def writers(app, db, host: Host):
     """Every firewall WRITE. Needs Sys.Modify at cluster and node scope and
     VM.Config.Network at guest scope, which is exactly what the lifecycle

@@ -36,6 +36,45 @@ def test_monitoring_can_read_the_guest_agent():
     assert "VM.GuestAgent.Audit" in CAPABILITIES["monitoring"].privileges
 
 
+def test_monitoring_can_read_a_node_firewall_log():
+    """PVE gates /nodes/{node}/firewall/log behind Sys.Syslog, which VM.Audit
+    and Sys.Audit do not imply. Without it the Firewall log page answers 502 on
+    every correctly scoped install, and the product's OWN monitoring token
+    reproduced it, so this was never a harness artefact.
+
+    Third time a missing privilege has surfaced one at a time (Sys.PowerMgmt,
+    then VM.GuestAgent.Audit, then this), and all three share a cause: the box
+    was historically driven with a root token, which bypasses the check, so the
+    scoped role was never exercised. A sweep of every read call on 2026-08-29
+    found exactly three gaps and only this one belonged in this role.
+    """
+    s = generate_script([])
+    assert "Sys.Syslog" in s
+    assert "Sys.Syslog" in CAPABILITIES["monitoring"].privileges
+
+
+def test_the_audit_role_is_not_given_write_or_console_privileges():
+    """The other two gaps that sweep found are NOT fixed here, on purpose.
+
+    A guest's firewall log needs VM.Console and a storage's config needs
+    Datastore.Allocate. Both were tempting to add to this role to make one
+    call site work, and both would have handed the read-only token console
+    access to every guest, or allocation rights on every datastore. They are
+    routed to the console and lifecycle credentials instead
+    (services/firewall.py::guest_log_reader, api/storage.py::storage_config).
+
+    This test is the guard on that decision: the audit role stays auditing.
+    """
+    audit = set(CAPABILITIES["monitoring"].privileges)
+    for forbidden in ("VM.Console", "Datastore.Allocate", "Datastore.AllocateSpace",
+                      "Sys.Modify", "VM.Allocate", "VM.PowerMgmt"):
+        assert forbidden not in audit, (
+            f"{forbidden} is not an audit privilege; route the call to the "
+            f"capability that owns it instead of widening this role")
+    assert all(p.endswith(".Audit") or p == "Sys.Syslog" for p in audit), (
+        f"every monitoring privilege should be a read: {sorted(audit)}")
+
+
 def test_a_capability_that_was_not_chosen_contributes_nothing():
     s = generate_script([])
     assert "ProxployLifecycle" not in s

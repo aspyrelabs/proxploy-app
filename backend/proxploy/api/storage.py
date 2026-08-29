@@ -215,7 +215,13 @@ def storage_config(request: Request, host_id: int, name: str, db=Depends(get_db)
                    user: User = Depends(_manage)):
     host = _host_or_404(db, host_id)
     try:
-        cfg = client_for_host(request.app, db, host).storage_config(name)
+        # Lifecycle, not the default monitoring. PVE gates GET on a single
+        # storage's config behind Datastore.Allocate, which the audit role does
+        # not carry and should not: the config it returns is the pool's full
+        # definition, filtered for secrets below. Measured 2026-08-29, 403
+        # (/storage/local, Datastore.Allocate) on monitoring, fine on lifecycle.
+        cfg = client_for_host(request.app, db, host,
+                              capability="lifecycle").storage_config(name)
     except ProxmoxError as e:
         raise HTTPException(502, str(e))
     return {k: v for k, v in cfg.items()
