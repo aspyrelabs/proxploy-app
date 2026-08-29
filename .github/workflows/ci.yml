@@ -1,52 +1,9 @@
 name: ci
-# Mostly manual: run the whole thing from the Actions tab, or
-# `gh workflow run ci.yml`. Only `frontend`, `e2e` and `backend` also run on a
-# push, and only when a push touched code they actually cover. Every other job
-# carries `if: github.event_name != 'push'` and stays hand-run, which is what
-# the owner asked for when the blanket push trigger came out.
-#
-# `backend` joined them on 2026-08-25. Its 2000-odd tests were running nowhere
-# except on a developer's laptop, so a backend regression could be pushed to
-# main and reported green by a run that had never executed a single backend
-# test. Its license-audit STEP keeps the manual gate, because the hand-run
-# licensing check is a deliberate decision and not the thing that was broken.
-#
-# The frontend/e2e exceptions are here because they are the jobs that rot
-# silently.
-# They assert on the UI as it is drawn, so a rename, a control moved into a
-# menu, or an added wizard step breaks them without breaking anything a unit
-# test looks at. Between 2026-08-09 and 2026-08-24 nobody dispatched this
-# workflow, and in that window the e2e suite went fully dark: journey.spec.ts
-# failed its first step and the `chromium` project depends on it, so the other
-# 14 tests reported "did not run" rather than failing. Six separate drifts had
-# piled up by the time anyone looked.
-#
-# The weekly schedule is back as of 2026-08-25, at the cron it had before
-# 051b04d removed it. Hand-running was the plan, and for 16 days nobody did:
-# between 2026-08-09 and 2026-08-25 the six dispatch-only jobs never ran once,
-# and the first dispatch after that gap found pve-integration erroring on
-# EVERY runner (a fixture opening the dev master key before its own skip
-# guard). A job that is always red stops carrying information, which is how
-# that survived in plain sight. A schedule event is not a push, so this runs
-# the whole workflow, licence audit and disposable-PVE matrix included, which
-# is the drift check that was the point of it.
+# Manual only. The push and weekly-schedule triggers were removed on
+# 2026-08-30 because the GitHub Actions allowance ran out; restore them
+# from git history when it resets.
 on:
   workflow_dispatch:
-  schedule: [{cron: "17 3 * * 1"}]   # weekly: catches upstream/licensing drift
-  push:
-    branches: [main]
-    paths:
-      - 'frontend/**'
-      # The e2e job boots the real backend (playwright.config.ts webServer),
-      # so a server-side change can break it with no frontend file touched.
-      - 'backend/proxploy/**'
-      # `backend` runs on push now, so the things that decide whether it passes
-      # have to be able to trigger it. A test-only or dependency-only change
-      # used to start no run at all.
-      - 'backend/tests/**'
-      - 'backend/pyproject.toml'
-      - 'backend/scripts/**'
-      - '.github/workflows/ci.yml'
 
 jobs:
   backend:
