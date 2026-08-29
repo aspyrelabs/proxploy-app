@@ -335,9 +335,8 @@ def test_entitlements_endpoint(client, csrf_header, bootstrap_admin):
 # sides carry a copy so drift fails whichever repo you are working in, and both
 # skip when the sibling checkout is absent. Neither CI checks out the other
 # repo (the two live under different GitHub owners, so GITHUB_TOKEN cannot
-# reach across), so these run locally only: .githooks/pre-push runs them as
-# `-m parity` and refuses the push outright when the sibling is missing, rather
-# than letting a skip read as a pass.
+# reach across), so these run locally only, where both repos sit side by side
+# and nothing skips. `pytest -m parity` is the 0.6s targeted check.
 
 def _tiers_yaml():
     import pathlib
