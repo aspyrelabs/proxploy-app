@@ -12,6 +12,35 @@
 	# disable TLS.
 	tls {$PROXPLOY_TLS_DIRECTIVE}
 
+	# Nothing else in the product sets a response header, so these are the
+	# only ones an install gets. Found missing by the security sweep of
+	# 2026-08-29.
+	#
+	# frame-ancestors and X-Frame-Options are the pair that matter. Without
+	# them an attacker's page can put this interface in an iframe and collect
+	# a signed-in operator's clicks, and SameSite does not help because the
+	# clicks land in the genuine first-party UI. This panel can power off a
+	# node and install scripts as root, so it is not a page to allow framed.
+	#
+	# NO Strict-Transport-Security on purpose. A LAN install runs `tls
+	# internal`, on Caddy's own CA, so the browser already shows a warning the
+	# operator clicks through. HSTS turns that warning into a hard block with
+	# no click-through, which would lock an operator out of their own
+	# appliance with no way back in. It belongs with a publicly-trusted
+	# certificate, not here.
+	#
+	# Also not a full Content-Security-Policy: script-src and style-src have
+	# to be fitted to what the built frontend actually loads, and a wrong one
+	# breaks the app silently in a browser rather than loudly in CI. That is
+	# its own piece of work. frame-ancestors stands alone safely.
+	header {
+		X-Frame-Options DENY
+		Content-Security-Policy "frame-ancestors 'none'"
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+
 	encode zstd gzip
 	reverse_proxy 127.0.0.1:8000 {
 		# Console and job-log streams are long-lived; the default
