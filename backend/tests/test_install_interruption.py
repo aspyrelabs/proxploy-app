@@ -228,6 +228,85 @@ def test_reconcile_is_idempotent(tmp_path):
     _run(scenario)
 
 
+def test_a_swept_unknown_job_is_not_announced_as_interrupted(tmp_path):
+    """The restart message must not say a root install did nothing.
+
+    sweep_orphans writes the row directly and never goes through _finish, so
+    the per-job notification _finish sends does not happen here. Before this,
+    the only thing an operator was told after a restart was the aggregate
+    "N jobs interrupted", counting jobs that were actually unknown. Interrupted
+    means nothing happened, which is the claim JobUnknown exists to stop
+    making, arriving through a different door.
+    """
+    async def scenario():
+        app = make_job_app(tmp_path, fake=FakePVE())
+        sent = []
+        backend = JobBackend(app)
+        backend._notify_async = lambda event, title, body: sent.append(
+            (event, title, body))
+        with app.state.sessionmaker() as db:
+            db.add(Job(id=20, kind="app.install", status="running",
+                       target_name="node1",
+                       checkpoint={"dispatched": True, "before_ctids": [],
+                                   "host_id": 1, "ctid": CTID,
+                                   "catalog_slug": "redis"}))
+            db.add(Job(id=21, kind="host.sync", status="running"))
+            db.commit()
+
+        backend.sweep_orphans()
+
+        events = {e for e, _, _ in sent}
+        assert "job.unknown" in events, (
+            f"a dispatched install was swept with no unknown notification: {sent}")
+        unknown_body = next(b for e, _, b in sent if e == "job.unknown")
+        assert "node1" in unknown_body
+        assert "checking the host" in unknown_body
+        assert "interrupted" not in unknown_body.lower()
+
+        aggregate = [b for e, _, b in sent if e == "job.interrupted"]
+        assert aggregate, "the genuinely interrupted job still needs announcing"
+        assert "1 job interrupted" in aggregate[0], (
+            f"the unknown job was counted as interrupted: {aggregate[0]}")
+    _run(scenario)
+
+
+def test_recovery_writes_no_second_audit_row_and_no_second_install(tmp_path):
+    from proxploy.models import AuditEvent
+
+    async def scenario():
+        pve = FakePVE(); _seed_storage(pve)
+        app = make_job_app(tmp_path, fake=pve)
+        host_id = _seed(app, pve)
+        app.state.ssh_connect_factory = _ssh_that_builds_then_drops(pve, CTID)
+
+        backend = JobBackend(app)
+        with pytest.raises(JobUnknown):
+            await run_install(JobContext(backend, job_id=1),
+                              {"catalog_slug": "redis", "host_id": host_id,
+                               "name": "Redis", "ctid": CTID, "overrides": {}})
+        with app.state.sessionmaker() as db:
+            db.get(Job, 1).status = "unknown"
+            db.add(AuditEvent(actor_type="user", actor_id=1, action="app.install",
+                              result="ok", target_type="host", target_id=host_id))
+            db.commit()
+            before = db.query(AuditEvent).count()
+
+        backend.sweep_orphans()
+        for _ in range(100):
+            with app.state.sessionmaker() as db:
+                if db.get(Job, 1).status != "unknown":
+                    break
+            await asyncio.sleep(0.05)
+        backend.sweep_orphans()
+
+        with app.state.sessionmaker() as db:
+            assert db.query(AuditEvent).count() == before
+            assert db.query(Job).filter_by(kind="app.install").count() == 1
+            assert db.get(Job, 1).status == "succeeded"
+            assert db.query(App).filter_by(host_id=host_id, ctid=CTID).count() == 1
+    _run(scenario)
+
+
 def test_sweep_orphans_splits_dispatched_from_never_started(tmp_path):
     """Proxploy dying is the other way to be interrupted, and it lands on the
     same reconciler through the same checkpoint. A job that never dispatched

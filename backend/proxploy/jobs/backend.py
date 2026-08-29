@@ -297,6 +297,7 @@ class JobBackend:
                     .filter(Job.status.in_(("queued", "running")))
                     .all())
             orphans = [(j.id, j.kind) for j in rows]
+            names = {j.id: (j.target_name or j.kind) for j in rows}
             # A job that had already dispatched an effect is not `interrupted`,
             # which reads as "it did not happen". Its checkpoint says the
             # command reached a root shell before this process died, so the
@@ -327,11 +328,27 @@ class JobBackend:
         # loop, which is why this is not inside the session above.
         for job_id, kind in stale:
             self._reconcile_after(job_id, kind)
-        if orphans:
-            kinds = ", ".join(sorted({kind for _, kind in orphans}))
-            job_word = "job" if n == 1 else "jobs"
-            title = f"Proxploy restarted: {n} {job_word} interrupted"
-            body = f"Proxploy restarted. {n} {job_word} interrupted: {kinds}"
+        if unknown:
+            from proxploy.services.notification_types import BY_KEY, type_for_job
+            for j in unknown:
+                key = type_for_job(j.kind, "unknown")
+                row = BY_KEY.get(key)
+                where = names.get(j.id, j.kind)
+                self._notify_async(
+                    key,
+                    f"Proxploy: {row.label if row else j.kind + ' unknown'}",
+                    f"Proxploy restarted while this was running on {where}. It "
+                    f"had already started work on the host, so it may have "
+                    f"completed, stopped partway, or done nothing. Proxploy is "
+                    f"checking the host to find out which.")
+
+        interrupted = [(i, k) for i, k in orphans if i not in unknown_ids]
+        if interrupted:
+            kinds = ", ".join(sorted({kind for _, kind in interrupted}))
+            count = len(interrupted)
+            job_word = "job" if count == 1 else "jobs"
+            title = f"Proxploy restarted: {count} {job_word} interrupted"
+            body = f"Proxploy restarted. {count} {job_word} interrupted: {kinds}"
             self._notify_async("job.interrupted", title, body)
         return n
 
