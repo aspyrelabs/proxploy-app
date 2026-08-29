@@ -311,11 +311,22 @@ class JobBackend:
                 j.finished_at = now
             n = len(rows)
             db.commit()
+        # Every job still sitting in `unknown` from an earlier life, not only
+        # the ones this sweep just marked. A reconciliation that was itself
+        # running when the process died was just swept to `interrupted`, and
+        # nothing else would ever ask again: the install would stay unknown
+        # forever and the App Store would stay blocked on it. Re-queuing is
+        # safe because run_install_reconcile no-ops on a job that is no longer
+        # unknown, which is also what stops two of them racing.
+        with self.app.state.sessionmaker() as db:
+            stale = (db.query(Job.id, Job.kind)
+                     .filter(Job.status == "unknown")
+                     .all())
         # Queued after the commit, so a reconciliation can never read the row
         # it is about while that row is still `running`. Enqueue hops to the
         # loop, which is why this is not inside the session above.
-        for j in unknown:
-            self._reconcile_after(j.id, j.kind)
+        for job_id, kind in stale:
+            self._reconcile_after(job_id, kind)
         if orphans:
             kinds = ", ".join(sorted({kind for _, kind in orphans}))
             job_word = "job" if n == 1 else "jobs"

@@ -353,6 +353,20 @@ async def run_install(ctx: JobContext, params: dict) -> dict:
             f"the connection to {host.name} was lost while the install script "
             f"was running: {type(e).__name__}: {e}. Proxploy does not know "
             f"whether the container was created and is checking the node.") from e
+    if status is None:
+        # asyncssh returns exit_status None when the channel closed without
+        # delivering one, which is what a dropped connection actually looks
+        # like: wait_closed() completes normally and nothing is raised. Found
+        # on hardware; the SSH fake raises instead, so every non-hardware test
+        # took the except branch above and this path was invisible.
+        #
+        # No exit status means the script's own verdict never arrived, and it
+        # was already running as root when the channel went, so this is the
+        # same "may have completed" case as a raised connection error.
+        raise JobUnknown(
+            f"the connection to {host.name} closed without the install script "
+            f"reporting an exit status. Proxploy does not know whether the "
+            f"container was created and is checking the node.")
     if status != 0:
         raise JobFailed(f"install script exited {status}")
 
