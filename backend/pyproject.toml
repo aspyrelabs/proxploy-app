@@ -88,6 +88,7 @@ testpaths = ["tests"]
 markers = [
   "pve_integration: needs a disposable live PVE (PROXPLOY_TEST_PVE_* env)",
   "e2e: cross-repo roundtrip against a local proxploy-api",
+  "parity: entitlement key-set parity, needs the proxploy-api checkout",
 ]
 
 [tool.mutmut]

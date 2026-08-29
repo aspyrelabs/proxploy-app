@@ -333,10 +333,11 @@ def test_entitlements_endpoint(client, csrf_header, bootstrap_admin):
 #
 # proxploy-api has the mirror of these two tests (tests/test_tiers.py). Both
 # sides carry a copy so drift fails whichever repo you are working in, and both
-# skip when the sibling checkout is absent, which is also the one hole left:
-# neither CI checks out the other repo, so these run locally only. Checking out
-# the sibling in CI is the fix; until then, running the suite in a tree with
-# both repos present is what catches drift.
+# skip when the sibling checkout is absent. Neither CI checks out the other
+# repo (the two live under different GitHub owners, so GITHUB_TOKEN cannot
+# reach across), so these run locally only: .githooks/pre-push runs them as
+# `-m parity` and refuses the push outright when the sibling is missing, rather
+# than letting a skip read as a pass.
 
 def _tiers_yaml():
     import pathlib
@@ -351,6 +352,7 @@ def _tiers_yaml():
     return yaml.safe_load(p.read_text())
 
 
+@pytest.mark.parity
 def test_registry_and_tiers_yaml_have_identical_key_sets():
     from proxploy.entitlements.registry import FLAG_KEYS
 
@@ -368,6 +370,7 @@ def test_registry_and_tiers_yaml_have_identical_key_sets():
             f"extra {sorted(set(m) - set(FLAG_KEYS))}")
 
 
+@pytest.mark.parity
 def test_free_baseline_matches_the_homelab_tier():
     """No licence and a Homelab licence must grant exactly the same thing.
 

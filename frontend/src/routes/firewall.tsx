@@ -13,6 +13,7 @@ import { FirewallRuleForm } from '../components/FirewallRuleForm'
 import { FirewallRuleTable } from '../components/FirewallRuleTable'
 import { Dialog } from '../components/ui/dialog'
 import { QueryState } from '../components/QueryState'
+import type { FeatureKey } from '../api/feature-keys'
 // shellRoute comes from ./shell, never ../router: importing router.tsx here
 // would force its eager createRouter() to run mid-cycle when this file is the
 // import entry point (e.g. a test importing this route file directly), as
@@ -42,7 +43,7 @@ export function canEditFirewall(role: string, kind: Scope['kind']): boolean {
  *  useMe/useEntitlements reads as permissive so the first fetch does not
  *  grey out every control on every page load; the backend still refuses
  *  a write it should refuse. */
-function useFirewallCanEdit(kind: Scope['kind'], flag: string): boolean {
+function useFirewallCanEdit(kind: Scope['kind'], flag: FeatureKey): boolean {
   const me = useMe()
   const ent = useEntitlements()
   const roleOk = me.data == null || canEditFirewall(me.data.role, kind)

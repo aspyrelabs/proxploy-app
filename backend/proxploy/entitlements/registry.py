@@ -49,8 +49,8 @@ FLAG_KEYS: tuple[str, ...] = (
 # This list is the app-side copy of proxploy-api's `homelab` tier map. Two
 # copies because the two repos ship separately and the app must know its own
 # floor with no network; the copies are pinned together by
-# test_free_baseline_matches_tiers_yaml (here) and
-# test_free_features_match_the_homelab_tier (proxploy-api), which fail loudly
+# test_free_baseline_matches_the_homelab_tier (here) and
+# test_app_side_tier_sets_match_this_file (proxploy-api), which fail loudly
 # on drift rather than letting one side quietly diverge.
 FREE_OFF: frozenset[str] = frozenset({
     "hosts.multi",

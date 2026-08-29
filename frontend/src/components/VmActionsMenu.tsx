@@ -18,7 +18,7 @@ import { Button } from './ui/button'
 import { Dialog } from './ui/dialog'
 import { canEditFirewall } from '../routes/firewall'
 import { Icon } from './ui/icon'
-
+import type { FeatureKey } from '../api/feature-keys'
 const itemCls = 'flex cursor-pointer items-center gap-2 px-3 py-2 text-[13px] text-text-2 '
              + 'outline-none data-[highlighted]:bg-panel-2 data-[highlighted]:text-text '
              + 'data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50'
@@ -95,7 +95,7 @@ export function VmActionsMenu({ vm, lifecycle = true, children }: {
   // Same "innocent until proven guilty" rule: has() reads false until
   // /entitlements lands, so gating on it directly would grey these out on every
   // plan for the whole first fetch.
-  const planDenied = (flag: string) => ent.data != null && !ent.has(flag)
+  const planDenied = (flag: FeatureKey) => ent.data != null && !ent.has(flag)
   const cloneDenied = planDenied('vms.clone')
   const backupDenied = planDenied('backups.run')
   // Destroying a VM is gated on the same flag that creates one: the plan that

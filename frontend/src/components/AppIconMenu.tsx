@@ -15,7 +15,7 @@ import { MigrateDialog } from './MigrateDialog'
 import { ReconfigureDialog } from './ReconfigureDialog'
 import { UninstallDialog } from './UninstallDialog'
 import { Icon } from './ui/icon'
-
+import type { FeatureKey } from '../api/feature-keys'
 const itemCls = 'flex cursor-pointer items-center gap-2 px-3 py-2 text-[13px] text-text-2 '
              + 'outline-none data-[highlighted]:bg-panel-2 data-[highlighted]:text-text '
              + 'data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50'
@@ -82,7 +82,7 @@ export function AppIconMenu({ app, lifecycle = true, children }: {
   // Same wait-for-first-fetch rule as api/app-gates.ts's "innocent until
   // proven guilty": has() reads false until /entitlements lands, so gating on
   // it directly would grey these out on every plan for the whole first fetch.
-  const planDenied = (flag: string) => ent.data != null && !ent.has(flag)
+  const planDenied = (flag: FeatureKey) => ent.data != null && !ent.has(flag)
   const reconfigureDenied = planDenied('apps.reconfigure')
   const migrateDenied = planDenied('migrate.cross_host')
   const backupDenied = planDenied('backups.run')

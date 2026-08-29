@@ -19,7 +19,7 @@ import { amberLinkCls, buttonCls } from './ui/button'
 import { Icon } from './ui/icon'
 import { Skeleton, SkeletonLine } from './ui/skeleton'
 import { useEntitlements } from '../api/hooks'
-
+import type { FeatureKey } from '../api/feature-keys'
 /** The tiers are one section on the homepage; proxploy-web has no /pricing
  *  route (see its src/App.tsx). Always the production site, never a
  *  env-derived base: this is the public price list, and a dev build sending
@@ -57,7 +57,7 @@ export function LockVeil({ locked, feature, subtitle, skeleton, minHeight = 210,
    *  tier in the copy is looked up from it rather than written at the call
    *  site: four call sites used to say "Pro" in a hardcoded string, and three
    *  of those features are not Pro any more. */
-  feature: string
+  feature: FeatureKey
   /** One line on what the feature does, in the operator's words. The headline
    *  above it is generated, so this is the part worth writing. */
   subtitle: string

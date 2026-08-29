@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { api } from './client'
+import type { FeatureKey } from './feature-keys'
 import type { IconColors } from '../components/IconTile'
 
 export type Me = { id: number; email: string; display_name: string | null; role: string }
@@ -49,11 +50,11 @@ export function useEntitlements() {
     // consumer tell "not entitled" apart from "could not check" and render
     // "could not check" instead of the UI of a tenant who simply lacks the
     // feature.
-    has: (key: string) => q.data?.features[key] ?? false,
+    has: (key: FeatureKey) => q.data?.features[key] ?? false,
     // The plan a locked feature needs, or null when it is not locked (or we
     // could not check). Only ever used for copy, never for an access
     // decision, which is `has` above and, really, the backend.
-    tierFor: (key: string) => q.data?.required_tier?.[key] ?? null,
+    tierFor: (key: FeatureKey) => q.data?.required_tier?.[key] ?? null,
     unknown: q.isError,
   }
 }

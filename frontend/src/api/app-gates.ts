@@ -1,6 +1,6 @@
 import { useEntitlements } from './hooks'
 import { useHostCapabilities } from './hosts'
-
+import type { FeatureKey } from './feature-keys'
 export type AppGate = { denied: boolean; reason: string | undefined }
 
 const NO_GATE: AppGate = { denied: false, reason: undefined }
@@ -30,11 +30,11 @@ export function useAppActionGates(hostId: number) {
   const landed = ent.data != null
   const capsLanded = hostCaps.loaded
 
-  const plan = (flag: string): boolean => landed && !ent.has(flag)
+  const plan = (flag: FeatureKey): boolean => landed && !ent.has(flag)
   const capability = (name: 'lifecycle' | 'console'): boolean =>
     capsLanded && hostCaps.capabilities?.[name] === false
 
-  const gate = (missingToken: string | null, flag: string): AppGate => {
+  const gate = (missingToken: string | null, flag: FeatureKey): AppGate => {
     if (missingToken) return { denied: true, reason: noToken(missingToken) }
     if (plan(flag)) return { denied: true, reason: NOT_IN_PLAN }
     return NO_GATE
