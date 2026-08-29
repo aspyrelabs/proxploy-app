@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 // (not a shared module) since this is a small e2e harness.
 export const BASE_URL = 'http://127.0.0.1:5173'
 export const ADMIN_EMAIL = 'e2e-admin@example.com'
-export const ADMIN_PASSWORD = 'e2e-smoke-passphrase-1'
+export const ADMIN_PASSWORD = 'E2e-smoke-passphrase-1'
 
 // Lives inside playwright.config.ts's `.e2e-data`, the throwaway dir its
 // webServer command `rm -rf`s and recreates at the start of every run, so a

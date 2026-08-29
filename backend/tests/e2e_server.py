@@ -215,6 +215,9 @@ def _seed_cluster():
 
 def create_e2e_app():
     from proxploy.config import Settings
+    from proxploy.entitlements.client import Entitlements
+    from proxploy.entitlements.keys import load_root_keys
+    from proxploy.entitlements.registry import DEV_FEATURES
     from proxploy.main import create_app
     from tests.fakes.pve import make_addressed_factory
     from tests.fakes.ssh import FakeSSHConnection, make_fake_connect_factory
@@ -265,7 +268,11 @@ def create_e2e_app():
     # ProxmoxClient._connect already wraps into the same ProxmoxError a dead
     # node produces, so a typo'd address in a spec reads as "cannot connect"
     # rather than as a 500.
-    return create_app(settings,
-                      proxmox_factory=make_addressed_factory(
-                          {NODE_ADDRESS: fake, **_seed_cluster()}),
-                      ssh_factory=make_fake_connect_factory(ssh))
+    app = create_app(settings,
+                     proxmox_factory=make_addressed_factory(
+                         {NODE_ADDRESS: fake, **_seed_cluster()}),
+                     ssh_factory=make_fake_connect_factory(ssh))
+    if os.environ.get("PROXPLOY_E2E_ENTITLED") == "1":
+        app.state.entitlements = Entitlements(load_root_keys(settings),
+                                              baseline=DEV_FEATURES)
+    return app

@@ -46,7 +46,7 @@ test('a stranger onboards, installs an app, creates a VM and schedules a backup'
     await page.goto('/onboarding')
     await page.getByLabel('Email').fill(ADMIN_EMAIL)
     await page.getByLabel('Display name').fill('E2E Admin')
-    await page.getByLabel('Password (12+ chars)').fill(ADMIN_PASSWORD)
+    await page.getByLabel('Password', { exact: true }).fill(ADMIN_PASSWORD)
     // The form commits to a local review screen first; nothing is created
     // until "Create account", which is the point of the review.
     await page.getByRole('button', { name: 'Review' }).click()
@@ -83,7 +83,7 @@ test('a stranger onboards, installs an app, creates a VM and schedules a backup'
     await page.getByRole('checkbox', { name: /^Lifecycle/ }).check()
     await page.getByLabel('Lifecycle token id', { exact: true }).fill('proxploy@pve!e2e-lifecycle')
     await page.getByLabel('Lifecycle token secret', { exact: true }).fill('secret')
-    await page.getByLabel(/Enable App Store installs/).check()
+    await page.getByLabel(/authorizes a root shell on the node/).check()
     await page.getByRole('button', { name: 'Add host' }).click()
     await expect(page.getByRole('button', { name: 'I have added it' })).toBeVisible()
   })
@@ -104,11 +104,11 @@ test('a stranger onboards, installs an app, creates a VM and schedules a backup'
     // fakes pve-01 over SSH and Proxploy does not run on it, and saveSelfHost
     // (null) is what stores that and advances the wizard.
     await page.getByRole('button', { name: 'None of these' }).click()
-    await expect(page.getByRole('button', { name: /open the dashboard/i })).toBeVisible()
+    await expect(page.getByRole('button', { name: /no, thanks/i })).toBeVisible()
   })
 
   await test.step('land on Hosts', async () => {
-    await page.getByRole('button', { name: /open the dashboard/i }).click()
+    await page.getByRole('button', { name: /no, thanks/i }).click()
     await expect(page.getByRole('heading', { name: 'Hosts', level: 1 })).toBeVisible()
   })
 
@@ -126,7 +126,7 @@ test('a stranger onboards, installs an app, creates a VM and schedules a backup'
     const dialog = page.getByRole('dialog')
     await dialog.getByRole('combobox').selectOption({ label: HOST_NAME })
     await dialog.getByLabel('App name').fill(APP_NAME)
-    await dialog.getByPlaceholder('Container ID (CTID)').fill(APP_CTID)
+    await dialog.getByLabel('Container ID', { exact: true }).fill(APP_CTID)
     await dialog.getByLabel('I understand this runs as root on the node').check()
     await dialog.getByRole('button', { name: 'Install' }).click()
     await expect(dialog.getByText('succeeded')).toBeVisible({ timeout: 20_000 })

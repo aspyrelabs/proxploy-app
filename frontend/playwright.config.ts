@@ -20,6 +20,16 @@ const dataDir = path.resolve(root, '.e2e-data')
 const BACKEND_PORT = 8000
 const FRONTEND_PORT = 5173
 
+// A SECOND install, on the real free-tier entitlement floor, for the specs
+// that assert a denied gate. The main pair above runs with
+// PROXPLOY_E2E_ENTITLED=1 so every other spec can drive the whole product;
+// nothing there can ever see a gate refuse, which is why this exists.
+// Separate ports and a separate data dir because entitlements are per-app
+// state, so one process cannot be both at once.
+const freeDataDir = path.resolve(root, '.e2e-data-free')
+const FREE_BACKEND_PORT = 8100
+const FREE_FRONTEND_PORT = 5273
+
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: true,
@@ -43,9 +53,20 @@ export default defineConfig({
     { name: 'journey', testMatch: 'journey.spec.ts', use: { ...devices['Desktop Chrome'] } },
     {
       name: 'chromium',
-      testIgnore: 'journey.spec.ts',
+      // denied.spec.ts belongs to `free` below and drives the OTHER pair of
+      // servers. Left in here it would run against the fully entitled install
+      // and fail on every assertion, so both projects name their specs.
+      testIgnore: ['journey.spec.ts', 'denied.spec.ts'],
       dependencies: ['journey'],
       use: { ...devices['Desktop Chrome'] },
+    },
+    {
+      // The free-tier install. No dependency on `journey`: different backend,
+      // different database, nothing to order against.
+      name: 'free',
+      testMatch: 'denied.spec.ts',
+      use: { ...devices['Desktop Chrome'],
+             baseURL: `http://127.0.0.1:${FREE_FRONTEND_PORT}` },
     },
   ],
   webServer: [
@@ -70,6 +91,26 @@ export default defineConfig({
         PROXPLOY_POLL_ENABLED: 'false',
         PROXPLOY_SCHEDULER_ENABLED: 'false',
         PROXPLOY_ALERTS_ENABLED: 'false',
+        // Everything on, so the specs can drive the whole product surface.
+        // The free-tier pair below deliberately omits this.
+        PROXPLOY_E2E_ENTITLED: '1',
+      },
+    },
+    {
+      command: `rm -rf '${freeDataDir}' && mkdir -p '${freeDataDir}' && `
+        + `${path.join(backendDir, '.venv/bin/uvicorn')} tests.e2e_server:create_e2e_app `
+        + `--factory --host 127.0.0.1 --port ${FREE_BACKEND_PORT}`,
+      cwd: backendDir,
+      url: `http://127.0.0.1:${FREE_BACKEND_PORT}/api/v1/meta/health`,
+      reuseExistingServer: false,
+      timeout: 60_000,
+      env: {
+        PROXPLOY_DATA_DIR: freeDataDir,
+        PROXPLOY_DB_URL: `sqlite:///${path.join(freeDataDir, 'proxploy.db')}`,
+        PROXPLOY_MASTER_KEY_FILE: path.join(freeDataDir, 'master.key'),
+        PROXPLOY_POLL_ENABLED: 'false',
+        PROXPLOY_SCHEDULER_ENABLED: 'false',
+        PROXPLOY_ALERTS_ENABLED: 'false',
       },
     },
     {
@@ -90,6 +131,15 @@ export default defineConfig({
       // crashed on boot. Pipe it: the next failure should say which.
       stdout: 'pipe',
       timeout: 120_000,
+    },
+    {
+      command: `npx vite --host 127.0.0.1 --port ${FREE_FRONTEND_PORT} --strictPort`,
+      cwd: root,
+      url: `http://127.0.0.1:${FREE_FRONTEND_PORT}`,
+      reuseExistingServer: false,
+      stdout: 'pipe',
+      timeout: 120_000,
+      env: { PROXPLOY_PROXY_TARGET: `http://127.0.0.1:${FREE_BACKEND_PORT}` },
     },
   ],
 })
