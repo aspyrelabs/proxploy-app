@@ -125,6 +125,21 @@ def default_factory(**kwargs):
 # can flip the module attribute; an operator sets the env var.
 ALLOW_LOOPBACK_TARGET = os.environ.get("PROXPLOY_ALLOW_LOOPBACK_TARGET") == "1"
 
+# KNOWN GAP, accepted and not fixed (security sweep, 2026-08-29). resolve_target
+# validates a HOSTNAME, and proxmoxer then resolves that same hostname again
+# when it opens its own connection, so the two lookups can disagree. Attacker
+# controlled DNS on a short TTL can answer the check with a safe address and the
+# connection with 169.254.169.254.
+#
+# open_validated_tcp_socket below is immune, and is the fix pattern if this is
+# ever closed: it connects to the literal IP that was validated, so there is no
+# second lookup to poison. The TLS fingerprint path and the console websockets
+# both go through it. Only _connect's proxmoxer client re-resolves.
+#
+# Rated low and left alone deliberately: reaching this requires the operator to
+# be adding a host under an attacker's name and handing it Proxmox credentials,
+# at which point the attacker has the credentials anyway.
+
 _DENIED_CLASSES = (
     ("a link-local address", "is_link_local"),  # 169.254.169.254 lives here
     ("a loopback address", "is_loopback"),
