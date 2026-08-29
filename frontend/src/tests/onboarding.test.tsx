@@ -75,10 +75,16 @@ beforeEach(() => {
   probeResult = { version: '9.2.10', release: '9.2', missing_privileges: [] }
   peersResult = STANDALONE_PEERS
   scriptCalls = []
+  settingsPatches = []
+  patchFails = false
   probeHeld = false; releaseProbe = null
   addHeld = false; releaseAdd = null
   verifyHeld = false; releaseVerify = null
+  navigate.mockClear()
 })
+
+let settingsPatches: unknown[] = []
+let patchFails = false
 
 vi.mock('../api/client', () => {
   class ApiErrorImpl extends Error {
@@ -109,6 +115,11 @@ vi.mock('../api/client', () => {
       if (path === '/settings' && (!init?.method || init.method === 'GET')) {
         return Promise.resolve(settingsData)
       }
+      if (path === '/settings' && init?.method === 'PATCH') {
+        settingsPatches.push(JSON.parse(String(init.body)))
+        return patchFails ? Promise.reject(new ApiErrorImpl(503, {}))
+                          : Promise.resolve({})
+      }
       if (path === '/hosts/self' && init?.method === 'PUT') {
         const hostId = JSON.parse(String(init.body)).host_id
         selfHostCalls.push(hostId)
@@ -130,13 +141,19 @@ vi.mock('../api/client', () => {
   }
 })
 
+// One shared spy rather than a fresh vi.fn() per call, so a test can assert
+// WHERE the wizard sent the operator, not merely that it tried to go somewhere.
+const navigate = vi.fn()
+
 vi.mock('@tanstack/react-router', async (orig) => ({
   ...(await orig() as object),
-  useNavigate: () => vi.fn(),
+  useNavigate: () => navigate,
 }))
 
 import { HostForm } from '../components/HostForm'
 import { Wizard } from '../routes/onboarding'
+
+const patched = () => settingsPatches
 
 const withQuery = (ui: React.ReactNode) => {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -325,7 +342,7 @@ describe('onboarding wizard', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'I have added it' }))
     fireEvent.click(await screen.findByRole('button', { name: /verify access/i }))
     expect(await screen.findByText(/not authorized yet/i)).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /open the dashboard/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /no, thanks/i })).not.toBeInTheDocument()
   })
 
   it('calls out a host key mismatch as a security event, distinct from "not yet"', async () => {
@@ -355,7 +372,7 @@ describe('onboarding wizard', () => {
     expect(document.body.textContent).not.toMatch(/\d+ ?%/)
 
     releaseVerify?.({ verified: true, verified_at: 'now' })
-    expect(await screen.findByRole('button', { name: /open the dashboard/i })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: /no, thanks/i })).toBeInTheDocument()
   })
 
   it('advances once the server actually verifies the key', async () => {
@@ -364,7 +381,7 @@ describe('onboarding wizard', () => {
     renderWizard()
     fireEvent.click(await screen.findByRole('button', { name: 'I have added it' }))
     fireEvent.click(await screen.findByRole('button', { name: /verify access/i }))
-    expect(await screen.findByRole('button', { name: /open the dashboard/i })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: /no, thanks/i })).toBeInTheDocument()
   })
 
   it('recovers the authorized_keys line after a reload with no host in session', async () => {
@@ -403,14 +420,69 @@ describe('onboarding wizard', () => {
   it('lands on the done step once everything is settled', async () => {
     mockOnboarding({ admin_exists: true, host_added: true, ssh_pending: false, complete: false })
     renderWizard()
-    expect(await screen.findByRole('button', { name: /open the dashboard/i })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: /no, thanks/i })).toBeInTheDocument()
+  })
+
+  it('"No, thanks" completes onboarding and opens the dashboard', async () => {
+    mockOnboarding({ admin_exists: true, host_added: true, ssh_pending: false, complete: false })
+    renderWizard()
+    fireEvent.click(await screen.findByRole('button', { name: /no, thanks/i }))
+    // Staying on the free plan must still finish setup. Navigating without
+    // this PATCH drops the operator on Hosts with the wizard still pending,
+    // so the next page load sends them back into it.
+    await waitFor(() => expect(patched()).toContainEqual({ 'onboarding.complete': true }))
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith(
+      expect.objectContaining({ to: '/hosts' })))
+  })
+
+  it('"Upgrade to Pro" opens the pricing page and lands on Settings > Plan', async () => {
+    mockOnboarding({ admin_exists: true, host_added: true, ssh_pending: false, complete: false })
+    const open = vi.spyOn(window, 'open').mockReturnValue(null)
+    renderWizard()
+    fireEvent.click(await screen.findByRole('button', { name: /upgrade to pro/i }))
+
+    expect(open).toHaveBeenCalledWith(
+      'https://proxploy.com/#pricing', '_blank', 'noopener,noreferrer')
+    // Settings > Plan is where the licence key is entered, so that is where
+    // buying leads. Onboarding is completed first for the same reason as
+    // above: Settings is outside the wizard.
+    await waitFor(() => expect(patched()).toContainEqual({ 'onboarding.complete': true }))
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith(
+      expect.objectContaining({ to: '/settings', search: { section: 'plan' } })))
+    open.mockRestore()
+  })
+
+  it('offers both plans, and only the free one is marked as the current plan', async () => {
+    mockOnboarding({ admin_exists: true, host_added: true, ssh_pending: false, complete: false })
+    renderWizard()
+    expect(await screen.findByRole('heading', { name: 'Homelab' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Pro' })).toBeInTheDocument()
+    expect(screen.getByText('Current')).toBeInTheDocument()
+    // The old "Open the dashboard" button is gone: "No, thanks" carries that
+    // job now, and two controls doing one thing is what this replaced.
+    expect(screen.queryByRole('button', { name: /open the dashboard/i }))
+      .not.toBeInTheDocument()
+  })
+
+  it('says so and stays put when finishing cannot be saved', async () => {
+    // The button did nothing at all when the backend was unreachable: the
+    // PATCH rejected, navigate never ran, and no message said why. Navigating
+    // anyway would be worse, shell.tsx reads onboarding.complete and would
+    // send the operator straight back here.
+    mockOnboarding({ admin_exists: true, host_added: true, ssh_pending: false, complete: false })
+    patchFails = true
+    renderWizard()
+    fireEvent.click(await screen.findByRole('button', { name: /no, thanks/i }))
+    expect(await screen.findByText(/could not record that setup is finished/i))
+      .toBeInTheDocument()
+    expect(navigate).not.toHaveBeenCalled()
   })
 
   it('lets a stranger skip the host step entirely', async () => {
     mockOnboarding({ admin_exists: true, host_added: false, ssh_pending: false, complete: false })
     renderWizard()
     fireEvent.click(await screen.findByRole('button', { name: /skip for now/i }))
-    expect(await screen.findByRole('button', { name: /open the dashboard/i })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: /no, thanks/i })).toBeInTheDocument()
   })
 
   it('lets you go back to a completed step', async () => {
@@ -547,14 +619,14 @@ describe('onboarding wizard', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add host' }))
 
     expect(await screen.findByRole('checkbox', { name: /node2/ })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /open the dashboard/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /no, thanks/i })).not.toBeInTheDocument()
 
     // Skip is what ends the step, so nothing is added and the wizard moves on
     // to the Self step (a host now exists and self.host_id has never been
     // answerable before this moment).
     fireEvent.click(screen.getByRole('button', { name: 'Skip' }))
     fireEvent.click(await screen.findByRole('button', { name: /none of these/i }))
-    expect(await screen.findByRole('button', { name: /open the dashboard/i })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: /no, thanks/i })).toBeInTheDocument()
   })
 
   it('does not let you jump forward past the step the server is on', async () => {
@@ -572,7 +644,7 @@ describe('onboarding wizard', () => {
       mockSelfHostUnanswered()
       renderWizard()
       expect(await screen.findByText(/which host is this/i)).toBeInTheDocument()
-      expect(screen.queryByRole('button', { name: /open the dashboard/i })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: /no, thanks/i })).not.toBeInTheDocument()
     })
 
     it('records "none of these" and reaches done', async () => {
@@ -580,7 +652,7 @@ describe('onboarding wizard', () => {
       mockSelfHostUnanswered()
       renderWizard()
       fireEvent.click(await screen.findByRole('button', { name: /none of these/i }))
-      expect(await screen.findByRole('button', { name: /open the dashboard/i })).toBeInTheDocument()
+      expect(await screen.findByRole('button', { name: /no, thanks/i })).toBeInTheDocument()
       expect(selfHostCalls).toEqual([null])
     })
 
@@ -595,7 +667,7 @@ describe('onboarding wizard', () => {
       // no matching option yet.
       await screen.findByRole('option', { name: 'pve1' })
       fireEvent.change(select, { target: { value: '7' } })
-      expect(await screen.findByRole('button', { name: /open the dashboard/i })).toBeInTheDocument()
+      expect(await screen.findByRole('button', { name: /no, thanks/i })).toBeInTheDocument()
       expect(selfHostCalls).toEqual([7])
     })
 
@@ -614,7 +686,7 @@ describe('onboarding wizard', () => {
       mockSelfHostUnanswered()
       renderWizard()
       fireEvent.click(await screen.findByRole('button', { name: /skip for now/i }))
-      expect(await screen.findByRole('button', { name: /open the dashboard/i })).toBeInTheDocument()
+      expect(await screen.findByRole('button', { name: /no, thanks/i })).toBeInTheDocument()
       expect(selfHostCalls).toEqual([])
     })
   })

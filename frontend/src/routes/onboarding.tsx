@@ -61,6 +61,84 @@ function stepFrom(ob: Onboarding, selfAnswered: boolean): number {
   return S_DONE
 }
 
+const CHECKOUT_URL = 'https://proxploy.com/#pricing'
+
+const FREE_FEATURES = [
+  'One Proxmox host',
+  'Unlimited apps and VMs',
+  'App Store, consoles, snapshots',
+  'Firewall, storage, backups',
+  'Alerts, local login, two-factor',
+]
+
+const PRO_FEATURES = [
+  'Unlimited hosts, one combined view',
+  'Install to any host from one dashboard',
+  'Cross-host migration, with preflight',
+  'Scheduled auto-update windows',
+]
+
+function PlanRow({ children }: { children: string }) {
+  return (
+    <li className="flex gap-1.5 text-left text-[11.5px] leading-[1.45] text-text-2">
+      <span aria-hidden className="mt-[2px] text-text-3">&#183;</span>
+      <span>{children}</span>
+    </li>
+  )
+}
+
+/**
+ * The one upgrade offer in the product, shown at the end of setup. Both
+ * buttons leave the wizard, so this is the last step's only way out: staying
+ * on free opens the dashboard, upgrading opens the pricing page in a new tab
+ * and lands on Settings > Plan, which is where the licence key is entered.
+ *
+ * The Pro column lists exactly the four flags Pro actually turns on
+ * (entitlements/registry.py: FREE_OFF minus PRO_OFF), not a marketing list.
+ * A bullet here that does not unlock is a promise the app then breaks.
+ */
+function PlanPlug({ onDecline, onUpgrade }:
+                  { onDecline: () => void; onUpgrade: () => void }) {
+  return (
+    <div className="grid gap-2.5 sm:grid-cols-2">
+      <section className="flex flex-col rounded-card border border-line bg-panel-2 p-3.5">
+        <header className="mb-2 text-left">
+          <div className="flex items-baseline justify-between gap-2">
+            <h3 className="text-[13px] font-semibold text-text">Homelab</h3>
+            <span className="rounded-full bg-elev px-1.5 py-[1px] text-[9px] uppercase tracking-wide text-text-3">
+              Current
+            </span>
+          </div>
+          <p className="mt-0.5 text-[15px] font-semibold text-text">Free</p>
+          <p className="text-[10.5px] text-text-3">No time limit.</p>
+        </header>
+        <ul className="mb-3 flex-1 space-y-1">
+          {FREE_FEATURES.map(f => <PlanRow key={f}>{f}</PlanRow>)}
+        </ul>
+        <Button variant="ghost" className="w-full" onClick={onDecline}>No, thanks</Button>
+      </section>
+
+      <section className="flex flex-col rounded-card border border-amber/30 bg-panel-2 p-3.5
+                          shadow-[0_6px_18px_rgba(245,181,68,.10)]">
+        <header className="mb-2 text-left">
+          <h3 className="text-[13px] font-semibold text-text">Pro</h3>
+          <p className="mt-0.5 text-[15px] font-semibold text-text">
+            $49 <span className="text-[10.5px] font-normal text-text-3">/year</span>
+          </p>
+          <p className="text-[10.5px] text-text-3">Everything in Homelab, plus:</p>
+        </header>
+        <ul className="mb-3 flex-1 space-y-1">
+          {PRO_FEATURES.map(f => <PlanRow key={f}>{f}</PlanRow>)}
+        </ul>
+        <Button className="w-full" onClick={() => {
+          window.open(CHECKOUT_URL, '_blank', 'noopener,noreferrer')
+          onUpgrade()
+        }}>Upgrade to Pro</Button>
+      </section>
+    </div>
+  )
+}
+
 export function Wizard() {
   const navigate = useNavigate()
   const qc = useQueryClient()
@@ -88,6 +166,7 @@ export function Wizard() {
   const [verifyError, setVerifyError] = useState('')
   const [verifying, setVerifying] = useState(false)
   const [savingSelf, setSavingSelf] = useState(false)
+  const [finishError, setFinishError] = useState('')
 
   const me = useQuery({ queryKey: ['me'], queryFn: () => api<MeOut>('/auth/me'),
     enabled: !!ob.data?.admin_exists })
@@ -203,9 +282,26 @@ export function Wizard() {
     }
   }
 
-  async function finish() {
-    await api('/settings', { method: 'PATCH',
-      body: JSON.stringify({ 'onboarding.complete': true }) })
+  async function finish(to: 'dashboard' | 'plan' = 'dashboard') {
+    setFinishError('')
+    try {
+      await api('/settings', { method: 'PATCH',
+        body: JSON.stringify({ 'onboarding.complete': true }) })
+    } catch {
+      // Staying put beats navigating: onboarding.complete is what shell.tsx
+      // checks, so leaving on a failed write lands on a page that sends the
+      // operator straight back here with no explanation. Without this the
+      // button simply did nothing, which is how it read when the backend was
+      // down.
+      setFinishError('Proxploy could not record that setup is finished, so it '
+                   + 'kept you on this step. Check the Proxploy server is '
+                   + 'running, then try again.')
+      return
+    }
+    if (to === 'plan') {
+      navigate({ to: '/settings' as never, search: { section: 'plan' } as never })
+      return
+    }
     navigate({ to: '/hosts' as never })
   }
 
@@ -386,7 +482,8 @@ export function Wizard() {
             <p className="text-[13.5px] text-text-2">
               {host ? `Host ${host.name} connected.` : 'Setup complete.'} Proxploy is ready.
             </p>
-            <Button className="w-full" onClick={finish}>Open the dashboard</Button>
+            <PlanPlug onDecline={() => finish()} onUpgrade={() => finish('plan')} />
+            {finishError && <p className="text-[12.5px] text-red">{finishError}</p>}
           </div>
         )}
           </div>
