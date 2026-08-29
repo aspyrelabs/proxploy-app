@@ -1,3 +1,5 @@
+import type { JobStatus } from '../api/jobs'
+
 /**
  * Shared naming and relative-time formatting for anything that renders a
  * job/audit/alert row: BellPopover, the audit log, StatusPill, and the job
@@ -29,6 +31,7 @@ export function targetLabel(row: {
  */
 export const GERUND: Record<string, string> = {
   'app.install': 'installing',
+  'app.install.reconcile': 'checking the node after',
   'app.uninstall': 'uninstalling',
   'app.update': 'updating',
   'app.reconfigure': 'reconfiguring',
@@ -111,6 +114,7 @@ export const ACTION_LABEL: Record<string, string> = {
   'apikey.revoke': 'API Key Revoke',
   'app.forget': 'App Unlink',
   'app.install': 'App Install',
+  'app.install.reconcile': 'Install Check',
   // The poller finding the container gone and dropping Proxploy's own row.
   // Nobody removed anything through Proxploy, so this must not share a voice
   // with app.forget or app.uninstall. Unlink means the container is still on
@@ -228,7 +232,31 @@ export const ACTION_LABEL: Record<string, string> = {
  * `denied` and `error` are not in doc 13; without them the audit log mixed
  * "Complete" with a bare lowercase "denied".
  */
+/**
+ * Every job status, exhaustively. `Record<JobStatus, string>` is the point: a
+ * status added to the union without a label here is a compile error rather
+ * than a raw lowercase string leaking into the UI, which is exactly how
+ * `unknown` first rendered.
+ *
+ * Type-only import, so this does not close a runtime cycle with api/jobs.ts,
+ * which imports the functions below.
+ */
+export const JOB_STATUS_LABEL: Record<JobStatus, string> = {
+  queued: 'Waiting',
+  running: 'Running',
+  succeeded: 'Done',
+  failed: 'Failed',
+  canceled: 'Canceled',
+  interrupted: 'Interrupted',
+  // NOT a synonym for Failed. Failed says the node was not changed; this says
+  // the script was running as root and may have finished, and that Proxploy is
+  // asking the node which. Short because it sits in a chip; the sentence that
+  // names the host lives in jobUnknownMessage below.
+  unknown: 'Checking',
+}
+
 export const STATUS_LABEL: Record<string, string> = {
+  ...JOB_STATUS_LABEL,
   // Not "Pending", which is what a QUEUE is: this one means the guest is
   // being acted on right now and its real status is not known until the
   // action reports back.
@@ -236,16 +264,10 @@ export const STATUS_LABEL: Record<string, string> = {
   // An app being uninstalled. Its own word rather than "Working", because a
   // removal is the one action that ends with the row gone.
   removing: 'Removing',
-  queued: 'Waiting',
-  running: 'Running',
-  succeeded: 'Done',
   ok: 'Complete',
   denied: 'Refused',
   error: 'Error',
   resolved: 'Cleared',
-  canceled: 'Canceled',
-  interrupted: 'Interrupted',
-  failed: 'Failed',
   unreachable: 'Host Unreachable',
 }
 
@@ -255,6 +277,26 @@ export const STATUS_LABEL: Record<string, string> = {
  * the rule, and a kind stays out unless its outcomes have their own names.
  */
 const JOB_PHRASE: Record<string, Record<string, string>> = {
+  // Only the two outcomes that need their own words. Everything else about an
+  // install composes fine as "App Install" + status, and a kind stays out of
+  // this table unless its outcomes have real names.
+  'app.install': {
+    // "App Install Checking" is what the composed form produced, which reads
+    // as a status on the install rather than what happened to it.
+    unknown: 'Install Interrupted',
+  },
+  'app.install.reconcile': {
+    queued: 'Checking the Node',
+    running: 'Checking the Node',
+    // Named for what the operator learns, not for the job finishing. This job
+    // succeeding means the question was answered, and the answer itself is in
+    // the install job it resolved.
+    succeeded: 'Install Resolved',
+    failed: 'Could Not Check the Node',
+    canceled: 'Node Check Stopped',
+    interrupted: 'Node Check Interrupted',
+    unknown: 'Node Check Interrupted',
+  },
   'backup.run': {
     queued: 'Backup Queued',
     running: 'Backup Started',
@@ -328,8 +370,30 @@ export function jobPhrase(kind: string | null | undefined,
 
 /** hasOwn, not `STATUS_LABEL[s]`: a status of 'toString' would otherwise
  *  answer with the function on Object.prototype and render as JS source. */
+/**
+ * What an operator is told when a job ends `unknown`.
+ *
+ * Its own sentence rather than the backend's `error` string. That string is a
+ * diagnostic written for whoever reads the job row, and letting it be the UI
+ * copy means the words change whenever a handler's message does. The backend
+ * detail is still worth showing, underneath, as the reason.
+ *
+ * "Interrupted" first because that is what happened, and the checking second
+ * because that is what Proxploy is doing about it. Deliberately does NOT say
+ * failed: the script was running as root and may have completed.
+ */
+export function jobUnknownMessage(where: string | null | undefined): string {
+  return where
+    ? `Interrupted, checking what happened on ${where}.`
+    : 'Interrupted, checking what happened on the host.'
+}
+
 export function statusLabel(status: string | null | undefined): string {
-  if (!status) return 'unknown'
+  // 'No status' rather than 'unknown'. This used to return the literal string
+  // 'unknown' for a MISSING status, which then collided with `unknown` as a
+  // real job status: two different meanings sharing one word, in the function
+  // every surface routes through.
+  if (!status) return 'No status'
   return Object.hasOwn(STATUS_LABEL, status) ? STATUS_LABEL[status] : status
 }
 

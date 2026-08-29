@@ -5,7 +5,7 @@ import { useJobs } from '../api/jobs'
 import { useFiringAlerts } from '../api/alerts'
 import { alertToastSeverity } from '../api/live'
 import type { JobRow } from '../api/jobs'
-import { actionLabel, ago, duration, gerundFor, targetLabel } from '../lib/activityDisplay'
+import { actionLabel, ago, duration, gerundFor, jobUnknownMessage, targetLabel } from '../lib/activityDisplay'
 import { mergeNotifications } from '../lib/notificationMerge'
 import type { TrayItem } from '../lib/notificationMerge'
 import {
@@ -125,7 +125,11 @@ function TrayEmptyState({ title, note }: { title: string; note: string }) {
  *  a server-side record, not an inbox, so there is nothing to mark read. */
 function severityOf(status: string): NotificationSeverity {
   if (status === 'succeeded') return 'success'
-  if (status === 'failed') return 'destructive'
+  // Above cancelled and interrupted, not below them. A cancellation is a
+  // decision somebody made; this is a root script that may have half finished
+  // on a node, and it fell through to 'info' at first, which read as quieter
+  // than a job the operator stopped on purpose.
+  if (status === 'failed' || status === 'unknown') return 'destructive'
   if (status === 'canceled' || status === 'interrupted') return 'warning'
   return 'info'
 }
@@ -137,6 +141,10 @@ function severityOf(status: string): NotificationSeverity {
  *  kind nobody has written a gerund for, and new kinds arrive regularly: the
  *  plainer fallback beats invented English. */
 function messageOf(job: JobRow): string {
+  // Before the generic `job.error` branch: an unknown job always carries an
+  // error string, and letting that win would put a backend diagnostic in the
+  // notification instead of the words chosen for this state.
+  if (job.status === 'unknown') return jobUnknownMessage(targetLabel(job))
   if (job.error) return job.error
   const where = targetLabel(job) ?? 'this cluster'
   const verb = gerundFor(job.kind)

@@ -126,7 +126,11 @@ export function applyJob(qc: QueryClient, d: JobDelta, toast?: ToastFn) {
   // "synced just now" over a grid that stayed unchanged for five minutes.
   if (d.kind === 'catalog.refresh') qc.invalidateQueries({ queryKey: ['catalog'] })
   toast?.({
-    kind: d.status === 'succeeded' ? 'ok' : d.status === 'failed' ? 'err' : 'info',
+    // `unknown` is an error tone, not an informational one: a root script may
+    // have half finished on a node. It reached here only after TERMINAL was
+    // widened; before that applyJob returned above and no toast fired at all.
+    kind: d.status === 'succeeded' ? 'ok'
+      : (d.status === 'failed' || d.status === 'unknown') ? 'err' : 'info',
     text: jobLabel({ kind: d.kind ?? 'job', status: d.status }),
     jobId: d.id,
     // The backend's own reason a job failed ("node2 has no lifecycle API

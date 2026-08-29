@@ -178,7 +178,17 @@ describe('statusLabel', () => {
   // silently mislabelled.
   it('passes through a status nothing has named', () => {
     expect(statusLabel('stopped')).toBe('stopped')
-    expect(statusLabel(null)).toBe('unknown')
+  })
+
+  it('says "No status" for a missing one, not "unknown"', () => {
+    // This returned the literal 'unknown' until `unknown` became a real job
+    // status, at which point one word meant two different things in the
+    // function every surface routes through: "there is no status" and "the
+    // run finished and we do not know what it did". A missing status and an
+    // unresolved one must never render the same.
+    expect(statusLabel(null)).toBe('No status')
+    expect(statusLabel(undefined)).toBe('No status')
+    expect(statusLabel('unknown')).toBe('Checking')
   })
 })
 

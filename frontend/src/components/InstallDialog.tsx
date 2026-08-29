@@ -1,6 +1,9 @@
 import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { api } from '../api/client'
+import { apiErrorDetail } from '../api/client'
+import { TERMINAL, jobLabel, useJob, useReconcileFor, type JobRow } from '../api/jobs'
+import { jobUnknownMessage } from '../lib/activityDisplay'
 import { useCatalogEntry, useInstall } from '../api/catalog'
 import { PromptFields } from './install/PromptFields'
 import { unanswered } from '../lib/install-prompts'
@@ -35,6 +38,59 @@ type HostRow = {
 
 const MODES = [['default', 'Default'], ['advanced', 'Advanced']] as const
 
+/**
+ * What an operator is shown when an install ends `unknown`.
+ *
+ * Three things, in the order they are needed. What happened, in words that do
+ * not claim nothing did. How far it got, from the checkpoint, which is the only
+ * evidence there is. And what Proxploy is doing about it, as a visible job
+ * rather than a button that has silently stopped working.
+ *
+ * The backend's own error string sits underneath as the reason. It is a
+ * diagnostic, not the headline: letting it be the headline means the words
+ * change whenever a handler's message does.
+ */
+function InstallInterrupted({ job }: { job: JobRow }) {
+  const unresolved = job.status === 'unknown'
+  const reconcile = useReconcileFor(job.id, unresolved)
+  const latest = (reconcile.data ?? [])[0]
+  const cp = job.checkpoint ?? undefined
+  const where = job.target_name ?? (cp?.host_id != null ? `host ${cp.host_id}` : null)
+
+  return (
+    <div className="rounded-ctl border border-amber/30 bg-amber-dim p-3">
+      <p className="text-[13px] font-semibold text-amber">
+        {jobUnknownMessage(where)}
+      </p>
+      <p className="mt-1 text-[12.5px] text-text-2">
+        The install script runs as root on the node, so it may have finished,
+        stopped partway, or done nothing. Proxploy is asking the node which,
+        rather than guessing.
+      </p>
+
+      {cp?.dispatched && (
+        <p className="mt-2 text-[11.5px] text-text-3">
+          Last confirmed step: the script was sent to {where ?? 'the host'}
+          {cp.ctid != null ? ` for container ${cp.ctid}` : ''}, with{' '}
+          {cp.before_ctids?.length ?? 0} container
+          {(cp.before_ctids?.length ?? 0) === 1 ? '' : 's'} on it beforehand.
+        </p>
+      )}
+
+      <p className="mt-2 text-[11.5px] text-text-3">
+        {latest
+          ? `Check: ${jobLabel({ kind: latest.kind, status: latest.status })}.`
+          : 'Check queued.'}
+        {latest?.error ? ` ${latest.error}` : ''}
+      </p>
+
+      {job.error && (
+        <p className="mt-2 text-[11.5px] text-text-3">Reason: {job.error}</p>
+      )}
+    </div>
+  )
+}
+
 export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => void }) {
   const { data: entry, isError: entryFailed } = useCatalogEntry(slug)
   const hosts = useQuery({ queryKey: ['hosts'], queryFn: () => api<HostRow[]>('/hosts') })
@@ -66,6 +122,10 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
     version: string | null; hostname: string | null; unprivileged: boolean | null
   }>({ cpu: null, ram: null, disk: null, os: null, version: null, hostname: null, unprivileged: null })
   const [jobId, setJobId] = useState<number | null>(null)
+  // The transcript needs the job's own status: it drove nothing before, so the
+  // header stayed present-tense after the run ended and an unknown outcome was
+  // never mentioned at all.
+  const job = useJob(jobId)
   // services/appstore.py::run_install only calls ctx.progress(80) then (100),
   // so this is null on the freshly-enqueued job the install POST returns.
   // Seeded from that row rather than assumed zero.
@@ -248,9 +308,29 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
               dialog stops saying once the transcript replaces the form. Bare
               verb when the host is not readable. */}
           <span className="text-[12.5px] text-text-2">
-            {installTarget ? `Installing on ${installTarget}…` : 'Installing…'}
+            {/* Present tense only while it IS installing. It used to say
+                "Installing on node1…" forever, including after the run had
+                finished, because nothing here read the job's status. */}
+            {job.data && TERMINAL.includes(job.data.status)
+              ? jobLabel({ kind: job.data.kind, status: job.data.status })
+              : installTarget ? `Installing on ${installTarget}…` : 'Installing…'}
           </span>
         </div>
+        {job.data?.status === 'unknown' && (
+          <div className="mb-3"><InstallInterrupted job={job.data} /></div>
+        )}
+        {job.data?.status === 'succeeded' && Boolean(job.data.result?.reconciled) && (
+          /* Resolved AFTER an interruption, so the operator is told the
+             container was found rather than left wondering why the transcript
+             stops mid-install. Its own line, not the interrupted notice: that
+             one says a check is running, and this one is the answer. */
+          <p className="mb-3 rounded-ctl border border-green/30 bg-green-dim p-3
+                        text-[12.5px] text-green">
+            The connection dropped during this install. Proxploy checked the
+            node afterwards and found the container it created, so it is now
+            tracked and no second install is needed.
+          </p>
+        )}
         <JobLog jobId={jobId} onProgress={setProgress} />
         <Button className="mt-3" variant="ghost" onClick={onClose}>Close</Button>
       </div>
@@ -396,6 +476,15 @@ export function InstallDialog({ slug, onClose }: { slug: string; onClose: () => 
         </div>
         <div className="mt-4 flex justify-end gap-2">
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          {install.isError && (
+            /* In the dialog, not only as a toast. The operator is looking at
+               this form having just pressed Install; a refusal that appears
+               somewhere else reads as the button being broken, which is
+               exactly how the 409 behaved before it was rendered at all. */
+            <p role="alert" className="mb-2 text-[12.5px] text-red">
+              {apiErrorDetail(install.error, 'Could not start the install. Try again.')}
+            </p>
+          )}
           <Button variant="primary" disabled={!canSubmit || install.isPending} onClick={submit}>
             Install
           </Button>

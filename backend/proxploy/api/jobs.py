@@ -31,6 +31,11 @@ def job_out(j: Job) -> dict:
         "target_type": j.target_type, "target_id": j.target_id,
         "target_name": j.target_name,
         "params": j.params, "result": j.result, "error": j.error,
+        # What the node looked like before this job dispatched an effect. The
+        # only basis an operator has for judging an interrupted run, so it is
+        # served rather than kept for reconciliation's private use. NULL on
+        # every job that never dispatched one, which is almost all of them.
+        "checkpoint": j.checkpoint,
         "progress_pct": j.progress_pct, "requested_by": j.requested_by,
         "schedule_id": j.schedule_id,
         "started_at": to_iso(j.started_at),

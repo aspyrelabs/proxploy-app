@@ -299,6 +299,46 @@ class InstallIn(BaseModel):
 # remembered on Host.install_consent_at, not re-ticked per install) and an
 # already-enrolled `ssh_key` HostCredential: no key, no route, regardless of
 # consent.
+def _unresolved_install_detail(db, job, slug: str, host) -> str:
+    """Why a re-install is refused, in the words that fit THIS refusal.
+
+    Two situations wear the same 409 and an operator needs to tell them apart.
+    The ordinary one clears on its own and the message should say so. The
+    ambiguous one never will, because the check ran and could not attribute the
+    container, and that is the only state somebody can sit in indefinitely. A
+    message that does not distinguish them leaves the second looking like the
+    first and the operator waiting for something that is not coming.
+    """
+    last = (db.query(Job)
+            .filter(Job.kind == "app.install.reconcile",
+                    Job.target_type == "job", Job.target_id == job.id)
+            .order_by(Job.id.desc()).first())
+    stuck = last is not None and last.status == "failed" and last.error
+
+    if stuck and "cannot be established" in (last.error or ""):
+        return (
+            f"An earlier install of {slug} on {host.name} was interrupted, and "
+            f"Proxploy cannot tell which container it created: another guest "
+            f"was being created on {host.name} at the same time, so more than "
+            f"one appeared and neither can be attributed to this install. "
+            f"This will not clear on its own. Open the Apps page, find the "
+            f"container this install made, and adopt it. Installing again "
+            f"before that would leave a second one.")
+
+    if stuck:
+        return (
+            f"An earlier install of {slug} on {host.name} was interrupted, and "
+            f"the check to find out what it did could not reach the host "
+            f"({last.error}). It will be retried. Installing again before it "
+            f"succeeds could leave two containers.")
+
+    return (
+        f"An earlier install of {slug} on {host.name} was interrupted, and "
+        f"Proxploy is checking the node to find out whether it created a "
+        f"container. Installing again now could leave two. This clears by "
+        f"itself once the check finishes.")
+
+
 @router.post("/{slug}/install", status_code=202,
              dependencies=[Depends(_install),
                           Depends(require_entitlement("store.install"))])
@@ -370,12 +410,7 @@ def install_catalog_entry(slug: str, body: InstallIn, request: Request,
         cp = j.checkpoint or {}
         if (cp.get("catalog_slug") == slug
                 and cp.get("host_id") == body.host_id):
-            raise HTTPException(409,
-                f"a previous install of {slug} on this host was interrupted and "
-                f"Proxploy is still checking the node to find out whether it "
-                f"created a container (job {j.id}). Installing again now could "
-                f"leave two. This clears by itself once the check completes, or "
-                f"if the host is unreachable, once it can be reached.")
+            raise HTTPException(409, _unresolved_install_detail(db, j, slug, host))
     # BOTH host writes live here, after every refusal above, so a request that
     # 400s/404s/409s elsewhere in this route never mutates the host as a side
     # effect of failing. That matters most for the consent stamp: it is the
