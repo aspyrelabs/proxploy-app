@@ -43,7 +43,8 @@ def test_probe_reports_the_privileges_the_token_is_missing(tmp_path, csrf_header
 
 def test_probe_is_clean_for_a_fully_granted_token(tmp_path, csrf_header,
                                                   bootstrap_admin):
-    perms = {"/": {"Sys.Audit": 1, "VM.Audit": 1, "Datastore.Audit": 1,
+    perms = {"/": {"Sys.Audit": 1, "VM.Audit": 1, "VM.GuestAgent.Audit": 1,
+                   "Datastore.Audit": 1,
                    "Pool.Audit": 1, "SDN.Audit": 1}}
     c = _client(tmp_path, permissions=perms)
     with c:
@@ -56,7 +57,8 @@ def test_a_privilege_granted_on_a_narrower_path_counts(tmp_path, csrf_header,
                                                        bootstrap_admin):
     # Doc 08: scoping Proxploy to a pool is supported. A privilege granted
     # only on /pool/x is still granted, so it must not be reported missing.
-    perms = {"/pool/prod": {"Sys.Audit": 1, "VM.Audit": 1, "Datastore.Audit": 1,
+    perms = {"/pool/prod": {"Sys.Audit": 1, "VM.Audit": 1,
+                            "VM.GuestAgent.Audit": 1, "Datastore.Audit": 1,
                             "Pool.Audit": 1, "SDN.Audit": 1}}
     c = _client(tmp_path, permissions=perms)
     with c:
@@ -188,7 +190,8 @@ def test_an_existing_token_missing_node_power_still_enrols_cleanly_and_keeps_eve
     perfectly good monitoring grant must enrol exactly as it always did, and
     say nothing either way about a privilege that lives on a token this host
     has not been given yet."""
-    perms = {"/": {"Sys.Audit": 1, "VM.Audit": 1, "Datastore.Audit": 1,
+    perms = {"/": {"Sys.Audit": 1, "VM.Audit": 1, "VM.GuestAgent.Audit": 1,
+                   "Datastore.Audit": 1,
                    "Pool.Audit": 1, "SDN.Audit": 1}}
     c = _client(tmp_path, permissions=perms)
     with c:

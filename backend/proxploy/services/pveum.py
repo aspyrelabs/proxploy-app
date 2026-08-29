@@ -38,8 +38,8 @@ CAPABILITIES: dict[str, Capability] = {
     "monitoring": Capability(
         key="monitoring", label="Read-only monitoring", role="ProxployAudit",
         token="monitoring", required=True,
-        privileges=("VM.Audit", "Datastore.Audit", "Sys.Audit", "Pool.Audit",
-                    "SDN.Audit"),
+        privileges=("VM.Audit", "VM.GuestAgent.Audit", "Datastore.Audit",
+                    "Sys.Audit", "Pool.Audit", "SDN.Audit"),
         why="Pollers, dashboard, metrics, and every read view. Always required."),
     "lifecycle": Capability(
         key="lifecycle", label="Lifecycle", role="ProxployLifecycle",

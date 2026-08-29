@@ -17,6 +17,25 @@ def test_monitoring_is_always_present_even_if_not_asked_for():
         assert priv in s
 
 
+def test_monitoring_can_read_the_guest_agent():
+    """VM.Audit alone cannot call /agent/*: PVE gates get-fsinfo and
+    network-get-interfaces behind VM.GuestAgent.Audit, and answers a token
+    without it `403 (/vms/<id>, VM.GuestAgent.Audit|VM.GuestAgent.Unrestricted)`.
+
+    Verified on the lab node (PVE 9.2.10, VM 108) before this privilege was
+    added. Two things break without it, and neither one says so: the VM table's
+    Storage column reads "unknown" for every VM, because used bytes only ever
+    come from the agent, and the Network page shows a VM no addresses. Both
+    swallow the 403 and return None, so nothing is logged and nothing degrades.
+
+    It went unnoticed because the only install anyone drove held a hand-made
+    root@pam token for monitoring, which bypasses the check entirely.
+    """
+    s = generate_script([])
+    assert "VM.GuestAgent.Audit" in s
+    assert "VM.GuestAgent.Audit" in CAPABILITIES["monitoring"].privileges
+
+
 def test_a_capability_that_was_not_chosen_contributes_nothing():
     s = generate_script([])
     assert "ProxployLifecycle" not in s
