@@ -112,21 +112,12 @@ function groupByCluster(rows: MergedNode[]) {
   }
 }
 
-/** "Add host" where the hosts are, not only buried in Settings.
- *
- *  POST /hosts answers 403 {"error":"entitlement_required","feature":
- *  "hosts.multi"} once one host exists, and a raw 403 at the end of a filled
- *  form is the worst place to learn it. When the entitlement fetch itself
- *  failed we cannot claim either way, so the form opens and the backend stays
- *  the authority. */
-function AddHostSection({ hostCount }: { hostCount: number }) {
-  const ent = useEntitlements()
+/** "Add host" where the hosts are, not only buried in Settings. The
+ *  hosts.multi gate lives in AddHostDialog, so this route and Settings cannot
+ *  disagree about it. */
+function AddHostSection() {
   const qc = useQueryClient()
   const [open, setOpen] = useState(false)
-  // ent.data != null covers the pending window as well as the error one:
-  // !unknown alone is true while the fetch is still running, so clicking
-  // "Add host" in that sliver replaced the form with the upsell.
-  const blocked = hostCount >= 1 && ent.data != null && !ent.has('hosts.multi')
   return (
     <>
       <div className="mb-3 flex items-center justify-between">
@@ -134,7 +125,7 @@ function AddHostSection({ hostCount }: { hostCount: number }) {
         <Button variant="ghost" onClick={() => setOpen(true)}>Add host</Button>
       </div>
       {open && (
-        <AddHostDialog blocked={blocked} onClose={() => setOpen(false)}
+        <AddHostDialog onClose={() => setOpen(false)}
           onCreated={() => {
             setOpen(false)
             notify.success('Host added. Its nodes appear as the first poll lands.')
@@ -286,7 +277,7 @@ export function HostsPage() {
       </div>
 
       <div className="mt-5">
-        <AddHostSection hostCount={new Set((nodes ?? []).map((n) => n.host_id)).size} />
+        <AddHostSection />
         <QueryState query={nodesQuery}
                     loading={<SkeletonGroup label="Loading nodes" className={nodeGrid}>
                       {Array.from({ length: 3 }, (_, i) => <NodeCardSkeleton key={i} />)}

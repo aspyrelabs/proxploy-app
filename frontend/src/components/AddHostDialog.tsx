@@ -1,17 +1,48 @@
+import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+
+import { api } from '../api/client'
+import { useEntitlements } from '../api/hooks'
 import { Dialog } from './ui/dialog'
 import { HostForm, type HostCreated } from './HostForm'
 import { Icon } from './ui/icon'
 import { LockVeil } from './LockVeil'
 import { SkeletonField } from './ui/skeleton'
 
-export function AddHostDialog({ blocked = false, onClose, onCreated }: {
-  /** One host is included; a second needs the multi-host plan. Shown instead
-   *  of the form, because a 403 at the end of a filled form is the worst
-   *  place to learn it. */
-  blocked?: boolean
+/**
+ * One host is included; a second needs the multi-host plan, and the upsell is
+ * shown instead of the form because a 403 at the end of a filled form is the
+ * worst place to learn it.
+ *
+ * The gate is decided HERE, not by the caller. It used to be a `blocked` prop
+ * defaulting to false, so a caller that forgot it silently got the form: the
+ * Hosts page passed it and Settings > Hosts did not, which is exactly the bug
+ * that produced. Both routes render this component, so owning the decision
+ * here is what makes the two agree and keeps a third caller correct by
+ * default.
+ *
+ * Both reads are innocent until proven guilty, the rule app-gates.ts states:
+ * a pending or failed fetch opens the form and leaves the backend the
+ * authority, rather than showing an upsell to someone who may well be
+ * entitled.
+ */
+export function AddHostDialog({ onClose, onCreated }: {
   onClose: () => void
   onCreated: (h: HostCreated) => void
 }) {
+  const ent = useEntitlements()
+  const hosts = useQuery({ queryKey: ['hosts'], queryFn: () => api<{ id: number }[]>('/hosts') })
+  // Decided ONCE, on the first render where both reads have landed, and never
+  // revisited. Re-deriving it every render is wrong in a way only the e2e
+  // spec catches: adding the very first host makes the count 1 mid-flow, so a
+  // live gate swaps the capability-token step and the peer panel for an upsell
+  // the moment POST /hosts succeeds. The dialog is mounted fresh each time it
+  // opens, so latching here is per-opening, not for the session.
+  const [decided, setDecided] = useState<boolean | null>(null)
+  if (decided === null && ent.data != null && hosts.data != null) {
+    setDecided(hosts.data.length >= 1 && !ent.has('hosts.multi'))
+  }
+  const blocked = decided === true
   return (
     <Dialog width={672} scrollBody onClose={onClose}
       title={
