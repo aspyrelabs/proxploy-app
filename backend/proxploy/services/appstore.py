@@ -12,7 +12,8 @@ import shlex
 from collections import deque
 
 from proxploy.executor import SSHExecutor
-from proxploy.jobs import HANDLERS, JobContext, JobFailed
+from proxploy.executor.ssh import SSHHostKeyMismatch, SSHUnreachable
+from proxploy.jobs import HANDLERS, JobContext, JobFailed, JobUnknown
 from proxploy.models import App, AppScript, CatalogEntry, Host, Job, utcnow
 from proxploy.services import installanswers
 from proxploy.services.catalog import pinned_payload_script, raw_url
@@ -316,6 +317,14 @@ async def run_install(ctx: JobContext, params: dict) -> dict:
         if stream == "stdout":
             tail.append(line)
 
+    # Written BEFORE the dispatch, because a checkpoint written after it would
+    # be missing in exactly the crash it exists for. `before` is the same id set
+    # the post-check below diffs against; recording it is what lets that same
+    # question be asked later, by a reconciliation, on a run that never got to
+    # its own post-check.
+    ctx.checkpoint(dispatched=True, before_ctids=sorted(before), host_id=host_id,
+                   ctid=ctid, catalog_slug=catalog_slug, name=name)
+
     try:
         status = await executor.run_for_host(
             app.state.sessionmaker, app.state.secretstore, host_id, host.address, command,
@@ -325,6 +334,25 @@ async def run_install(ctx: JobContext, params: dict) -> dict:
         )
     except LookupError as e:
         raise JobFailed(str(e)) from e
+    except (SSHUnreachable, SSHHostKeyMismatch) as e:
+        # Both are raised from executor/ssh.py's connect block, BEFORE
+        # `async with conn`, so the command never reached a shell and there is
+        # nothing on the node to reconcile. `failed` is the honest answer and
+        # keeps the App Store unblocked.
+        raise JobFailed(str(e)) from e
+    except Exception as e:  # noqa: BLE001
+        # Anything else out of run_for_host happened after create_process, so
+        # the script was already running as root on the node. It may have done
+        # nothing, part of the work, or all of it, and this process can no
+        # longer tell which. Saying "failed" here is what turned one partial
+        # install into two containers: the operator reinstalls, the default
+        # blank ctid takes the next free id, and the first container is
+        # orphaned. A timeout counts too, because proc.terminate() runs on a
+        # command that was already executing.
+        raise JobUnknown(
+            f"the connection to {host.name} was lost while the install script "
+            f"was running: {type(e).__name__}: {e}. Proxploy does not know "
+            f"whether the container was created and is checking the node.") from e
     if status != 0:
         raise JobFailed(f"install script exited {status}")
 
@@ -416,6 +444,157 @@ async def run_install(ctx: JobContext, params: dict) -> dict:
         installanswers.bind(db, answers_handle, app_id)
     return {"app_id": app_id, "slug": out_slug}
 
+
+def _resolve_install_job(app, job_id: int, status: str, *, error: str | None = None,
+                         result: dict | None = None) -> None:
+    """Move an `unknown` install job to a real answer.
+
+    Writes the row directly because the run it describes is long over: this is
+    not a job finishing, it is a later job recording what the node said. Guarded
+    on the status still being `unknown` so two reconciles cannot both claim it.
+    """
+    with app.state.sessionmaker() as db:
+        job = db.get(Job, job_id)
+        if job is None or job.status != "unknown":
+            return
+        job.status = status
+        if error is not None:
+            job.error = error
+        if result is not None:
+            job.result = {**(job.result or {}), **result}
+        db.commit()
+
+
+def _record_reconciled_install(app, job_id: int, catalog_slug: str, host_id: int,
+                               ctid: int, name: str) -> int:
+    """Blocking: file the App row an interrupted install never got to file.
+
+    Deliberately leaves `installed_url` NULL. The success path reads it from
+    the script's last lines as they stream, and those lines are gone with the
+    connection. Guessing a URL is worse than not having one: services/webui.py
+    already asks the app when it is NULL, and that answer comes from the
+    running container rather than from a reconstruction.
+    """
+    entry, _host, install_script = _resolve(app, catalog_slug, host_id)
+    slug = f"{catalog_slug}-{host_id}-{ctid}"
+    with app.state.sessionmaker() as db:
+        existing = db.query(App).filter_by(host_id=host_id, ctid=ctid).one_or_none()
+        if existing is not None:
+            # Someone adopted it from the Apps page before reconciliation got
+            # here. That is a resolution, not a collision.
+            _resolve_install_job(app, job_id, "succeeded",
+                                 result={"app_id": existing.id, "reconciled": True})
+            return existing.id
+        row = App(host_id=host_id, ctid=ctid, name=name, slug=slug,
+                  catalog_slug=catalog_slug, category=entry.category,
+                  installed_url=None, web_path="/", adopted=True,
+                  update_available=None)
+        db.add(row)
+        db.flush()
+        db.query(AppScript).filter_by(app_id=row.id).delete()
+        db.add(AppScript(app_id=row.id, version=1, content=install_script,
+                         content_sha256=hashlib.sha256(install_script.encode()).hexdigest(),
+                         source="upstream", upstream_ref=entry.upstream_sha))
+        db.commit()
+        app_id = row.id
+    _resolve_install_job(app, job_id, "succeeded",
+                         result={"app_id": app_id, "reconciled": True})
+    return app_id
+
+
+async def run_install_reconcile(ctx: JobContext, params: dict) -> dict:
+    """Ask the node what an interrupted install actually did.
+
+    `run_install` already knows that exit status proves nothing and diffs the
+    container ids before and after to find out what was really built. That
+    check only ever ran on the success path, which is the one case where the
+    answer was least in doubt. This runs the same check on the interruption
+    path, from the checkpoint the interrupted run left behind.
+
+    It is a job rather than a boot step so it can be retried and so it never
+    makes startup wait on a node being reachable.
+
+    Three outcomes, and only three:
+      one new container   -> the install did build something. The App row is
+                             created here, which is what makes catalog.py's
+                             existing (host_id, ctid) guard refuse a duplicate
+                             from then on.
+      no new container    -> nothing was built. `failed` for real this time,
+                             said after asking rather than assumed.
+      anything ambiguous  -> stays `unknown`. An unreachable host or two new
+                             containers is not an answer, and guessing here
+                             would either orphan a container or claim one that
+                             belongs to another job.
+    """
+    app = ctx.backend.app
+    install_job_id = int(params["job_id"])
+    with app.state.sessionmaker() as db:
+        job = db.get(Job, install_job_id)
+        if job is None:
+            raise JobFailed(f"install job {install_job_id} no longer exists")
+        if job.status != "unknown":
+            # Already resolved, by an earlier reconcile or by an operator.
+            # Doing nothing is the correct behaviour: this is the guard that
+            # stops two reconciles racing into two App rows for one container.
+            return {"job_id": install_job_id, "outcome": "already resolved",
+                    "status": job.status}
+        cp = dict(job.checkpoint or {})
+    if not cp.get("dispatched"):
+        raise JobFailed(f"install job {install_job_id} never dispatched anything")
+
+    host_id = int(cp["host_id"])
+    catalog_slug = cp["catalog_slug"]
+    before = set(cp.get("before_ctids") or [])
+    pinned = cp.get("ctid")
+
+    ctx.log(f"asking the node what install job {install_job_id} actually did")
+    after = await asyncio.to_thread(_lxc_ids, app, host_id)
+    appeared = set(after) - before
+
+    # A container an unrelated guest-creating job built during the same window
+    # is not ours to claim. This is the reasoning _concurrent_guest_ctids was
+    # written for, reused rather than restated.
+    with app.state.sessionmaker() as db:
+        j = db.get(Job, install_job_id)
+        window_start, window_end = j.started_at, (j.finished_at or utcnow())
+    concurrent = await asyncio.to_thread(
+        _concurrent_guest_ctids, app, install_job_id, host_id,
+        window_start, window_end)
+    appeared -= concurrent
+
+    if pinned is not None:
+        # A pinned id removes the ambiguity entirely: either it is there or it
+        # is not, and nothing else on the node can be mistaken for it.
+        appeared = {int(pinned)} if int(pinned) in after else set()
+
+    if not appeared:
+        _resolve_install_job(app, install_job_id, "failed",
+                             error=f"the connection was lost during the install, and "
+                                   f"no container was created on the node. Checked "
+                                   f"after the fact; nothing was left behind.")
+        ctx.log("no container appeared: the install did not build anything")
+        return {"job_id": install_job_id, "outcome": "nothing was built"}
+
+    if len(appeared) != 1:
+        raise JobFailed(
+            f"{len(appeared)} containers appeared during install job "
+            f"{install_job_id} and none was pinned, so which one belongs to it "
+            f"cannot be established. Left unresolved deliberately: adopt the "
+            f"right container from the Apps page.")
+
+    ctid = appeared.pop()
+    ctx.log(f"CT {ctid} exists: the install completed after the connection was lost")
+    app_id = await asyncio.to_thread(
+        _record_reconciled_install, app, install_job_id, catalog_slug, host_id,
+        ctid, cp.get("name") or f"{catalog_slug}-{ctid}")
+    app.state.poller.wake(host_id)
+    app.state.bus.publish("resource", {"type": "app", "id": app_id,
+                                       "change": "installed"})
+    return {"job_id": install_job_id, "outcome": "container found", "app_id": app_id,
+            "ctid": ctid}
+
+
+HANDLERS["app.install.reconcile"] = run_install_reconcile
 
 HANDLERS["app.install"] = run_install
 

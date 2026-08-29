@@ -22,7 +22,11 @@ from collections.abc import Callable
 from proxploy.models import Job, JobEvent, Schedule, to_iso, utcnow
 from proxploy.services.audit import redact, resolve_target_name
 
-TERMINAL = ("succeeded", "failed", "canceled", "interrupted")
+# `unknown` is terminal for THIS job: the run is over and nothing will
+# resume it. Reconciliation later replaces the status with a real answer,
+# but it does so as its own job, so a job sitting in `unknown` is finished
+# and must not be waited on or cancelled.
+TERMINAL = ("succeeded", "failed", "canceled", "interrupted", "unknown")
 
 # ponytail: fixed pool: `queued` is real because a task waits on this before it
 # runs. A settings knob belongs with Phase 7's scheduler UI, where a user would
@@ -33,7 +37,25 @@ HANDLERS: dict[str, Callable] = {}
 
 
 class JobFailed(RuntimeError):
-    """Raised by a handler for an expected, reportable failure."""
+    """Raised by a handler for an expected, reportable failure.
+
+    Says the node was NOT changed. Anything that may have left an effect
+    behind is JobUnknown instead.
+    """
+
+
+class JobUnknown(RuntimeError):
+    """Raised when the job may have changed the node and we cannot tell.
+
+    `failed` is a claim, not an absence of one: it tells an operator nothing
+    happened. An install dispatches a community script to a root shell, so a
+    connection that dies after the dispatch leaves a node that may be halfway
+    through, fully built, or untouched, and reporting that as failed is how one
+    partial install becomes two containers.
+
+    A job finishing `unknown` is expected to be resolved by a reconciliation
+    that asks the node, which is what moves it to succeeded or failed for real.
+    """
 
 
 def handler(kind: str):
@@ -204,6 +226,22 @@ class JobContext:
             "data": {"stream": stream, "ts": to_iso(ts), "message": message},
         })
 
+    def checkpoint(self, **facts) -> None:
+        """Record what the node looked like before this job dispatches an
+        effect, so reconciliation can ask the node afterwards.
+
+        Committed on its own connection and BEFORE the effect leaves the
+        machine, which is the whole point: a checkpoint written after the
+        dispatch would be missing in exactly the crash it exists for. No
+        fanout and no publish, because this is not progress an operator is
+        watching, it is evidence for a recovery that may never be needed.
+        """
+        with self.backend.app.state.sessionmaker() as db:
+            job = db.get(Job, self.job_id)
+            if job is not None:
+                job.checkpoint = {**(job.checkpoint or {}), **facts}
+                db.commit()
+
     def progress(self, pct: int) -> None:
         pct = max(0, min(100, int(pct)))
         pct = max(pct, self._last_pct)  # safety net: never report backwards, see __init__
@@ -238,19 +276,46 @@ class JobBackend:
 
 
     def sweep_orphans(self) -> int:
-        """Boot-time reconciliation. Marks; never resumes. Orphans get a single
-                aggregate Notifier message: Apprise is blocking (~8s/channel) and
-                per-orphan sends would queue many blocking sends on the shared default
-                executor at once. Never awaited, so it can't stall startup."""
+        """Boot-time sweep. Marks; still never resumes.
+
+                Two outcomes now, not one. A job that had not dispatched anything is
+                `interrupted`, unchanged. A job whose checkpoint says its command had
+                already reached a root shell is `unknown` and gets a reconciliation
+                queued, because this process cannot say what the node did while it was
+                dead and only the node can.
+
+                The asking stays OUT of here deliberately. This runs at boot and must
+                not make startup wait on a node being reachable, and reconciliation
+                needs retries, which is a job's job. So this marks and hands off.
+
+                Orphans get a single aggregate Notifier message: Apprise is blocking
+                (~8s/channel) and per-orphan sends would queue many blocking sends on
+                the shared default executor at once. Never awaited, so it can't stall
+                startup."""
         with self.app.state.sessionmaker() as db:
-            orphans = (db.query(Job.id, Job.kind)
-                       .filter(Job.status.in_(("queued", "running")))
-                       .all())
-            n = (db.query(Job)
-                 .filter(Job.status.in_(("queued", "running")))
-                 .update({"status": "interrupted", "finished_at": utcnow()},
-                         synchronize_session=False))
+            rows = (db.query(Job)
+                    .filter(Job.status.in_(("queued", "running")))
+                    .all())
+            orphans = [(j.id, j.kind) for j in rows]
+            # A job that had already dispatched an effect is not `interrupted`,
+            # which reads as "it did not happen". Its checkpoint says the
+            # command reached a root shell before this process died, so the
+            # node may be halfway through and only the node can say. Same
+            # discriminator the handler uses for a dropped connection, so both
+            # ways of being interrupted land on the same reconciler.
+            unknown = [j for j in rows if (j.checkpoint or {}).get("dispatched")]
+            unknown_ids = {j.id for j in unknown}
+            now = utcnow()
+            for j in rows:
+                j.status = "unknown" if j.id in unknown_ids else "interrupted"
+                j.finished_at = now
+            n = len(rows)
             db.commit()
+        # Queued after the commit, so a reconciliation can never read the row
+        # it is about while that row is still `running`. Enqueue hops to the
+        # loop, which is why this is not inside the session above.
+        for j in unknown:
+            self._reconcile_after(j.id, j.kind)
         if orphans:
             kinds = ", ".join(sorted({kind for _, kind in orphans}))
             job_word = "job" if n == 1 else "jobs"
@@ -381,6 +446,10 @@ class JobBackend:
             self._finish(ctx, kind, "canceled", error="canceled by user",
                          target_type=target_type)
             raise
+        except JobUnknown as e:
+            # Ordered before JobFailed only for readability; they are siblings,
+            # not a hierarchy.
+            self._finish(ctx, kind, "unknown", error=str(e), target_type=target_type)
         except JobFailed as e:
             self._finish(ctx, kind, "failed", error=str(e), target_type=target_type)
         except Exception as e:  # noqa: BLE001  (a handler bug is a failed job)
@@ -413,6 +482,29 @@ class JobBackend:
             if job is not None:
                 job.status, job.started_at = "running", utcnow()
                 db.commit()
+
+    def _reconcile_after(self, job_id: int, kind: str) -> None:
+        """Queue the reconciliation for a job that ended `unknown`.
+
+        Generic on purpose: a kind opts in by registering `<kind>.reconcile`,
+        so this file needs to know nothing about installs. A kind with no
+        reconciler simply stays unknown, which is still an honest answer.
+
+        Never allowed to fail the finish it follows. The job is already
+        terminal and correctly marked; losing the reconciliation costs an
+        operator a manual check, while raising here would lose the status too.
+        """
+        reconcile_kind = f"{kind}.reconcile"
+        if reconcile_kind not in HANDLERS:
+            return
+        try:
+            with self.app.state.sessionmaker() as db:
+                self.enqueue(db, kind=reconcile_kind, target_type="job",
+                             target_id=job_id, params={"job_id": job_id},
+                             target_name=f"job {job_id}")
+        except Exception:  # noqa: BLE001
+            logging.getLogger(__name__).exception(
+                "could not queue %s for job %s", reconcile_kind, job_id)
 
     def _finish(self, ctx: JobContext, kind: str, status: str, *,
                 result: dict | None = None, error: str | None = None,
@@ -472,6 +564,11 @@ class JobBackend:
                       notify_type=type_for_job(kind, status),
                       **({"error": error} if error else {}))
         self._notify(job_id, kind, status, error, facts)
+        # After the row is terminal and the world has been told, so the
+        # reconciliation cannot observe a half-written status and so a failure
+        # to queue it cannot lose the status itself.
+        if status == "unknown":
+            self._reconcile_after(job_id, kind)
 
     def _notify(self, job_id: int, kind: str, status: str, error: str | None,
                 facts: dict) -> None:

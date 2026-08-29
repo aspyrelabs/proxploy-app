@@ -561,6 +561,12 @@ class Job(TimestampMixin, Base):
     target_name: Mapped[str | None] = mapped_column(Text)
     params: Mapped[dict | None] = mapped_column(JSON)
     result: Mapped[dict | None] = mapped_column(JSON)
+    # What the node looked like before this job dispatched an effect, and
+    # whether it dispatched one at all. Read only by reconciliation, after an
+    # interruption, to ask the node what actually happened. NULL means nothing
+    # had left the machine yet. Not folded into `result`: that is the outcome,
+    # and _finish overwrites it on success.
+    checkpoint: Mapped[dict | None] = mapped_column(JSON)
     error: Mapped[str | None] = mapped_column(Text)
     progress_pct: Mapped[int | None] = mapped_column(Integer)
     requested_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))

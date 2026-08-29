@@ -73,18 +73,20 @@ def test_new_maintenance_kinds_are_housekeeping_not_generic(kind):
     assert type_for_job(kind, "failed") == "housekeeping.failed"
 
 
-def test_registry_is_twenty_two_rows_with_unique_keys_and_human_labels():
+def test_registry_is_twenty_three_rows_with_unique_keys_and_human_labels():
     """The one place the registry's size is pinned on purpose.
 
     A literal here is the point: adding a notification type is a decision an
     operator sees in their preferences, so it should not be possible to make
     it without a test asking you to confirm the number. 20 -> 22 on
     2026-08-29 for catalog.apps_available/apps_unavailable
-    (services/catalog.py). Do NOT copy this number anywhere else; it was a
-    second copy in test_notifications_end_to_end.py that rotted.
+    (services/catalog.py), then 22 -> 23 the same day for job.unknown, the
+    outcome of a job that was interrupted after it had already dispatched an
+    effect. Do NOT copy this number anywhere else; it was a second copy in
+    test_notifications_end_to_end.py that rotted.
     """
-    assert len(TYPES) == 22
-    assert len({t.key for t in TYPES}) == 22
+    assert len(TYPES) == 23
+    assert len({t.key for t in TYPES}) == 23
     assert set(DEFAULTS) == set(BY_KEY)
     for t in TYPES:
         # A label is what an operator reads. Backend spelling never leaks.

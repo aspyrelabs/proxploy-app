@@ -40,6 +40,10 @@ TYPES: tuple[NotificationType, ...] = (
     NotificationType("job.succeeded", "Job succeeded", "Other jobs"),
     NotificationType("job.canceled", "Job cancelled", "Other jobs"),
     NotificationType("job.interrupted", "Job interrupted", "Other jobs"),
+    # An interrupted job that had already dispatched an effect. Worth its
+    # own row rather than folding into job.interrupted: that one means
+    # nothing happened, and this one means nobody knows yet.
+    NotificationType("job.unknown", "Job outcome unknown", "Other jobs"),
     NotificationType("alert.fired", "Alert triggered", "Alerts"),
     NotificationType("alert.resolved", "Alert resolved", "Alerts"),
     NotificationType("audit.error", "Audited action failed", "Audit"),
@@ -79,7 +83,8 @@ _KIND_PREFIX: dict[str, str] = {
 }
 
 # Cancel and interrupt are never categorised, whatever the kind.
-_GLOBAL_ONLY = {"canceled": "job.canceled", "interrupted": "job.interrupted"}
+_GLOBAL_ONLY = {"canceled": "job.canceled", "interrupted": "job.interrupted",
+                "unknown": "job.unknown"}
 
 
 def type_for_job(kind: str, status: str) -> str:

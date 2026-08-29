@@ -15,7 +15,8 @@ from sqlalchemy import nulls_last
 
 from proxploy.api.deps import authorize, get_db, require_entitlement
 from proxploy.api.jobs import job_out
-from proxploy.models import App, CatalogEntry, Host, HostCredential, User, to_iso, utcnow
+from proxploy.models import (App, CatalogEntry, Host, HostCredential, Job, User,
+                             to_iso, utcnow)
 from proxploy.services import installanswers
 from proxploy.services.audit import write_audit
 from proxploy.services.catalog import ensure_classified
@@ -352,6 +353,29 @@ def install_catalog_entry(slug: str, body: InstallIn, request: Request,
     if (db.query(App).filter_by(host_id=body.host_id, ctid=body.ctid)
             .one_or_none()) is not None:
         raise HTTPException(409, f"CT {body.ctid} on host {body.host_id} is already tracked")
+    # The guard above only fires when a ctid was supplied, and the dialog tells
+    # operators to leave it blank so the node picks the next free id. That is
+    # the gap that turns one interrupted install into two containers: the first
+    # run really built CT 9001, its job reads unknown, and a second run with no
+    # pinned id is handed 9002 while 9001 is left unmanaged.
+    #
+    # So refuse on the pair the operator actually repeats, (catalog_slug,
+    # host_id), while an install for it is still unresolved. `unknown` IS
+    # unresolved by definition: moving a job off it is the only thing
+    # reconciliation does, so no second flag can drift out of step with this.
+    unresolved = (db.query(Job)
+                  .filter(Job.kind == "app.install", Job.status == "unknown")
+                  .all())
+    for j in unresolved:
+        cp = j.checkpoint or {}
+        if (cp.get("catalog_slug") == slug
+                and cp.get("host_id") == body.host_id):
+            raise HTTPException(409,
+                f"a previous install of {slug} on this host was interrupted and "
+                f"Proxploy is still checking the node to find out whether it "
+                f"created a container (job {j.id}). Installing again now could "
+                f"leave two. This clears by itself once the check completes, or "
+                f"if the host is unreachable, once it can be reached.")
     # BOTH host writes live here, after every refusal above, so a request that
     # 400s/404s/409s elsewhere in this route never mutates the host as a side
     # effect of failing. That matters most for the consent stamp: it is the
