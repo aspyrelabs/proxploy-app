@@ -1,188 +1,156 @@
-# Proxploy
+<div align="center">
 
-Self-hosted web UI for managing Proxmox VE, "Unraid's experience, for
-Proxmox." Backend is FastAPI + SQLAlchemy (`backend/`), frontend is React 19
-+ Vite + TanStack Router (`frontend/`).
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="frontend/public/proxploy-logo-light.svg">
+  <img alt="Proxploy" src="frontend/public/proxploy-logo-dark.svg" width="420">
+</picture>
 
-This repository, `proxploy-app`, is **the product**: backend, frontend, and
-installer ship together as one versioned release artifact that installs onto
-a customer's own Proxmox host (or a plain Debian box, or via Docker). It is
-**not** a hosted service and there is nothing here to deploy to Coolify or
-any other PaaS: the app, API, web, and docs are four separate repos with
-four separate deployment models.
+### Your Proxmox cluster, with the console it deserves
 
-## Status, stated plainly
+Install apps, run VMs and containers, take backups, and hand out access,
+from one screen that anyone on your team can use.
 
-- **The repository is private.** It becomes public when the project is
-  ready to publish a release.
-- **No release has been published yet.** The installer
-  (`curl -fsSL https://proxploy.com/install.sh | bash`) is fully built and
-  tested, but there is nothing at that URL to fetch: it will 404. The
-  compiled-in release public key at `backend/proxploy/release_pubkey.pem` is
-  still a **placeholder** and the matching release private key does not
-  exist. `packaging/publishing-a-release.md` is the runbook that
-  generates the real keypair and cuts the first real release, do that
-  before pointing anyone at the one-liner.
-## Public keys
+[![CI](https://github.com/aspyrelabs/proxploy-app/actions/workflows/ci.yml/badge.svg)](https://github.com/aspyrelabs/proxploy-app/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/aspyrelabs/proxploy-app?style=flat-square&color=F8B340&label=release)](https://github.com/aspyrelabs/proxploy-app/releases)
+[![Stars](https://img.shields.io/github/stars/aspyrelabs/proxploy-app?style=flat-square&color=F8B340)](https://github.com/aspyrelabs/proxploy-app/stargazers)
+[![License: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0-F8B340?style=flat-square)](LICENSE)
+[![Docs](https://img.shields.io/badge/docs-docs.proxploy.com-F8B340?style=flat-square)](https://docs.proxploy.com)
 
-Two public keys reach this app from outside, and **both accept either
-spelling**: a full PEM, or just its base64 body with no `-----BEGIN`/`-----END`
-lines. A PEM is that same base64 wrapped in two label lines, and the labels
-say what the bytes are without contributing any, so dropping them changes
-nothing about the key. One line pastes into a config field or a JSON value
-without the armor getting mangled on the way.
+[Install](#install) · [Documentation](https://docs.proxploy.com) · [What you get](#what-you-get) · [Plans](#plans)
 
-| Key | Where it comes from | What it verifies |
-|---|---|---|
-| Entitlement signing keys | `backend/proxploy/entitlements/keys.py::BUNDLED_PUBLIC_KEYS`, plus the `ent_extra_keys_file` overlay | Entitlement tokens minted by proxploy-api |
-| Release signing key | `backend/proxploy/release_pubkey.pem`, or `PROXPLOY_RELEASE_PUBKEY_FILE` | The release manifest, before an update installs anything |
+<br>
 
-Both go through `backend/proxploy/pubkey.py::load_public_key`, which parses
-either form. Entitlement keys are then normalised to canonical PEM by
-`load_public_keys`, because PyJWT wants one, so `entitlements/client.py` never
-sees the bare form at all. The bundled set is stored bare.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/apps-dark.webp">
+  <img alt="The Apps screen: ten containers across two nodes, each with status, CPU, memory, storage and network, and stop, restart and open controls" src=".github/assets/apps-light.webp" width="880">
+</picture>
 
-A key in the `ent_extra_keys_file` overlay that does not parse is **dropped
-with an error logged**, not raised: one bad entry in an operator-supplied file
-must not take the bundled set down with it. A dropped `kid` then fails closed
-at verify time as "unknown signing key id", the same path an unrecognised
-`kid` already takes. Watch for that log line if a token is unexpectedly
-rejected, because a dropped key and a key that was never added look identical
-from the outside.
+</div>
 
-Neither of these is secret. The private halves live elsewhere: the
-entitlement signing key in proxploy-api's `PROXPLOY_API_SIGNING_KEY`, and the
-release signing key in the runbook at
-`packaging/publishing-a-release.md`. Neither exists in this repo, ever.
+---
 
-- **The database defaults to SQLite in WAL mode**, with Postgres available
-  via `PROXPLOY_DB_URL`. That's deliberate for a self-hosted, single-box
-  product, not a gap to close.
-- **There is no live Proxmox host in development.** The backend test suite
-  runs against `FakePVE` (`backend/tests/`), and the Playwright e2e suite
-  runs against a fake PVE/SSH server (`backend/tests/e2e_server.py`).
+Proxmox VE is a superb hypervisor with an interface built for people who
+already know Proxmox. Proxploy is the layer on top: a self-hosted web console
+that turns a node or a cluster into something closer to an app appliance. Pick
+an app, answer its questions, and it lands in a container. Watch what it is
+doing. Snapshot before you touch it. Give a colleague the one app they need
+instead of the keys to the node.
 
-## Install / deploy
+It runs on your hardware, talks to your Proxmox API, and stores its data in a
+single SQLite file. Nothing about your infrastructure leaves your network.
 
-> **Not installable today.** No release has been published (see "Status"
-> above). The commands below are what the finished installer accepts and
-> what Phase 9a proved end-to-end against local fixtures; they are not yet
-> usable against the real `proxploy.com` channel, because there is nothing
-> published there to fetch. `packaging/publishing-a-release.md` is what
-> makes them real.
+## What you would do by hand, and what Proxploy does instead
 
-Proxploy has three install shapes, all built in Phase 9a
-(`install.sh --help`). None of them
-apply to *this* repo as a hosted deployment, they're how the product lands
-on a customer's own hardware, once a release exists.
+| By hand | In Proxploy |
+|---|---|
+| Find an install script, read it, run `pct create`, wire up storage, start the service | Pick the app, answer the prompts it asks, watch the install log stream |
+| Work out which of your forty containers has an update waiting | Open Apps. Updates are listed, apply one or apply all |
+| Snapshot a VM before an upgrade, then find the rollback syntax | Name the snapshot, roll back from the same screen |
+| Move a container to another node and hope the target has room | Read the preflight, then run the migration |
+| Give a teammate console access without giving them the node | Assign a role scoped to that app |
 
-### 1. LXC on a Proxmox node (the one-liner)
+## What you get
+
+| Area | Included |
+|---|---|
+| **Apps** | Install from the catalog, start and stop, live logs, console, CPU and memory graphs, reconfigure, uninstall, and adopt containers you created before Proxploy existed |
+| **App Store** | Every script in the [community-scripts](https://github.com/community-scripts/ProxmoxVE) catalog, close to 500 of them installable in one click, with search, update detection, update all, and unattended updates |
+| **Virtual machines** | Create, clone, snapshot and roll back, boot and guest agent options, noVNC console in the browser, per-VM graphs |
+| **Hosts and cluster** | Guided onboarding, node status, quorum, an activity feed, and cross-host migration |
+| **Storage** | Browse content, upload ISOs, manage what the node exposes |
+| **Network and firewall** | Guest and host network config, firewall rules, objects, options, and the live firewall log |
+| **Backups** | Proxmox Backup Server integration, run now, schedules, retention, restore, and notifications when a job fails |
+| **Monitoring** | Metric history, alert rules, and notification routing to the channels you already use |
+| **Access** | Local accounts, two-factor auth, OIDC single sign-on, roles, teams, API tokens, and an audit log of every action |
+
+<div align="center">
+<table>
+<tr>
+<td width="50%" valign="top">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/store-dark.webp">
+  <img alt="The App Store, showing the community-scripts catalog by category with install buttons" src=".github/assets/store-light.webp">
+</picture>
+<sub><b>App Store.</b> The catalog, by category, with what is installable and what is not.</sub>
+</td>
+<td width="50%" valign="top">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/node-detail-dark.webp">
+  <img alt="A node detail page with load, CPU, memory and storage history and the guests running on that host" src=".github/assets/node-detail-light.webp">
+</picture>
+<sub><b>Node detail.</b> Load, history, hardware, and every guest on the host.</sub>
+</td>
+</tr>
+</table>
+</div>
+
+Credentials are encrypted at rest with a root-only key file. Crash reporting is
+off unless you switch it on, and even then it sends the exception and stack
+trace, never request bodies, headers, cookies, or addresses.
+
+## Install
+
+> [!NOTE]
+> The one-liner fetches a signed release from `proxploy.com`, which is not
+> serving the release channel yet. Until the first public release is cut, use
+> the Docker shape or run from source.
+
+**On a Proxmox node.** Creates a container, installs Proxploy inside it, and
+puts Caddy in front with a real certificate if you pass `--hostname`:
 
 ```bash
 curl -fsSL https://proxploy.com/install.sh | bash
 ```
 
-Run on a Proxmox VE node (detected via `pct` + `/etc/pve`), this creates a
-CT and installs Proxploy inside it, OS packages, a dedicated system user, a
-versioned release layout under `/opt/proxploy/releases/<version>/`, the
-`proxploy.service` systemd unit, and Caddy in front with a real Let's
-Encrypt certificate (`--hostname`) or a self-signed `tls internal` cert
-otherwise.
-
-### 2. systemd on a plain Debian box
+**On a plain Debian box.** Same install as a systemd service, without the
+container step:
 
 ```bash
 curl -fsSL https://proxploy.com/install.sh | bash -s -- --shape systemd
 ```
 
-Same install, minus the CT-creation step; for a bare Debian 12 host or VM
-that isn't itself a Proxmox node.
-
-### 3. Docker / Compose
+**With Docker.** Port 8006 on the host, state in a named volume:
 
 ```bash
 cd packaging/docker
 docker compose up -d
 ```
 
-`packaging/docker/Dockerfile` builds the frontend, then an editable install
-of the backend into a slim Python image; `packaging/docker/compose.yml`
-maps port 8006 on the host to 8000 in the container and persists
-`/var/lib/proxploy` in a named volume. This pulls `ghcr.io/aspyrelabs/
-proxploy:latest`, which; same caveat as above, has never been published.
-**This shape also deliberately cannot self-update** once it exists, a
-container replacing its own image from inside is how you lose the
-container. `POST /meta/update` returns `409` with the fix:
+Docker cannot update itself from inside, so `docker compose pull && docker
+compose up -d` is the upgrade path. The app says so in the update card rather
+than showing a button that cannot work.
 
-```bash
-docker compose pull && docker compose up -d
-```
+Full install notes, upgrades, and reverse proxy setup live at
+**[docs.proxploy.com](https://docs.proxploy.com)**.
 
-The update card in the UI states this rather than hiding the button.
+## Plans
 
-## Environment variables
+Everything you can do on the host you already own is free, with no licence and
+no account. Paid tiers are about scale and organisation, never about locking a
+capability behind a page you already opened.
 
-All settings are `pydantic-settings`, prefix `PROXPLOY_`, defined in
-`backend/proxploy/config.py`. Defaults shown are what a plain dev checkout
-gets; the installer and Docker image override the relevant ones.
+| | Homelab | Pro | Team |
+|---|:---:|:---:|:---:|
+| Apps, App Store, VMs, storage, network, firewall | ✓ | ✓ | ✓ |
+| Backups, schedules, alerts, notifications | ✓ | ✓ | ✓ |
+| Local accounts, two-factor auth, roles, audit log | ✓ | ✓ | ✓ |
+| More than one host | | ✓ | ✓ |
+| Cross-host migration with preflight | | ✓ | ✓ |
+| Unattended app updates | | ✓ | ✓ |
+| OIDC single sign-on | | | ✓ |
+| Teams and delegated roles | | | ✓ |
+| API tokens | | | ✓ |
 
-| Variable | Default | Purpose |
-|---|---|---|
-| `PROXPLOY_DB_URL` | `sqlite:///./data/proxploy.db` | Database DSN. SQLite (WAL) only. Proxploy is a single-box, self-hosted product and is not tested on any other engine; `SecretStore.ensure_key_file`'s guard against minting a fresh master key over a populated database keys off the SQLite file's existence, so a non-SQLite DSN silently loses that protection. |
-| `PROXPLOY_DATA_DIR` | `./data` | Root for the SQLite file, uploads, and other on-disk state. |
-| `PROXPLOY_MASTER_KEY_FILE` | `./data/master.key` | Root-only Fernet key file backing `SecretStore` (encrypts stored credentials). |
-| `PROXPLOY_SESSION_COOKIE` | `pp_session` | Session cookie name. |
-| `PROXPLOY_CSRF_COOKIE` | `pp_csrf` | CSRF cookie name. |
-| `PROXPLOY_SESSION_TTL_HOURS` | `168` | Session lifetime. |
-| `PROXPLOY_COOKIE_SECURE` | `false` | Set by the installer once TLS terminates in front of the app. |
-| `PROXPLOY_ENV` | `dev` | `dev` or `prod`; picks the default `PROXPLOY_API_BASE_URL` below (see that row). Any other value fails loudly at startup instead of silently falling back, since this is config at a trust boundary. |
-| `PROXPLOY_API_BASE_URL` | `https://api.proxploy.dev` in `dev`, `https://api.proxploy.com` in `prod` | Aspyre entitlements/licensing API base URL. Set explicitly to override the `PROXPLOY_ENV`-derived default; an explicit value always wins. |
-| `PROXPLOY_ENT_EXTRA_KEYS_FILE` | unset | Extra entitlement verification keys, if any. |
-| `PROXPLOY_SENTRY_DSN` | empty (reporting off) | **Opt-in.** Sends crash reports to Aspyre Labs' GlitchTip at `errors.aspyrelabs.com`. Off unless you set it, and the installer never sets it: Proxploy runs on your hardware managing your infrastructure, so crashes leaving your network is your call. When enabled, only the exception and stack trace are sent (`send_default_pii` is off), never request bodies, headers, cookies or client IPs. The DSN for the public project is `https://8c044c28af9d40bb8373c04cff2f1483@errors.aspyrelabs.com/2`; a DSN grants event submission only, never read access, so it is safe to put in `/etc/proxploy/proxploy.env`. Confirm it took effect with `GET /api/v1/meta/version`, whose `reporting` field is `off`, `on`, or `error: <type>`; a DSN that arrived blank or malformed otherwise behaves exactly like one that was never set. A malformed DSN is reported there rather than raised, so a typo never stops Proxploy from starting. |
-| `PROXPLOY_CATALOG_SLUGS` | built-in app-store list | App Store catalog slugs. |
-| `PROXPLOY_POLL_ENABLED` | `true` | Background Proxmox poller on/off. |
-| `PROXPLOY_POLL_INTERVAL_S` | `30.0` | Poller interval. |
-| `PROXPLOY_POLL_TIMEOUT_S` | `20.0` | Poller per-call timeout. |
-| `PROXPLOY_CONSOLE_TICKET_TTL_S` | `30.0` | VNC/term console ticket lifetime. |
-| `PROXPLOY_CONSOLE_IDLE_TIMEOUT_S` | `1800.0` | Console idle disconnect timeout. |
-| `PROXPLOY_STORAGE_UPLOAD_MAX_BYTES` | `16 GiB` | Max ISO upload size (also caps transient free disk needed). |
-| `PROXPLOY_PVE_TASK_TIMEOUT_S` | `3600.0` | Wall-clock ceiling for disk-copy-bound PVE jobs (clone, backup, restore, upload). |
-| `PROXPLOY_BACKUP_SYNC_STALE_S` | `900.0` | How stale a backup-sync snapshot can be before it's refreshed. |
-| `PROXPLOY_SCHEDULER_ENABLED` | `true` | Cron-style job scheduler on/off. |
-| `PROXPLOY_SCHEDULER_TICK_S` | `30.0` | Scheduler poll tick. |
-| `PROXPLOY_ALERTS_ENABLED` | `true` | Alert evaluation on/off (poller still writes samples either way). |
-| `PROXPLOY_OIDC_DEFAULT_ROLE` | unset (`None`) | If set, auto-provisions this role for first-time OIDC sign-ins; unset means new OIDC users are inactive until an admin activates them. |
-| `PROXPLOY_OIDC_DEFAULT_TEAM_SLUG` | `default` | Team new OIDC users are provisioned into. |
-| `PROXPLOY_TOTP_PENDING_TTL_S` | `300.0` | How long a pending-2FA token stays redeemable. |
-| `PROXPLOY_MIGRATE_ASSUMED_BPS` | `80e6` | Assumed LAN transfer rate used only for the migration preflight estimate. |
-| `PROXPLOY_RELEASE_CHANNEL_URL` | GitHub releases URL | Base URL of the release channel (manifest + signed tarball). |
-| `PROXPLOY_RELEASE_PUBKEY_FILE` | unset (uses the key shipped in the package) | Path to a release public key, to verify against a non-default key. The file may hold a PEM or just its base64 body; see [Public keys](#public-keys). |
-| `PROXPLOY_INSTALL_SHAPE` | unset | Set by the installer in `/etc/proxploy/proxploy.env`; unset means a dev checkout (self-update `check` works, `apply` refuses). |
-| `PROXPLOY_UPDATE_SCRIPT` | `/opt/proxploy/bin/proxploy-update` | Path to the updater script `POST /meta/update` runs via `systemd-run`. |
-| `PROXPLOY_UPDATE_TIMEOUT_S` | `600.0` | Timeout for the self-update run. |
-| `PROXPLOY_SELF_CTID` | unset | CT id of Proxploy's own container, written by the installer so it can recognise (and refuse to destroy) itself. |
+## Documentation
 
-Two more variables exist outside the `Settings` class:
+Install guides, upgrades, the configuration reference, and how the App Store
+handles adoption and updates all live at
+**[docs.proxploy.com](https://docs.proxploy.com)**.
 
-- **`PROXPLOY_IN_DOCKER`**: checked directly (`services/updater.py`), set to
-  `1` by `packaging/docker/Dockerfile`. Forces `detect_shape()` to report
-  `docker`, which is what makes `POST /meta/update` refuse to self-apply.
-- **`PROXPLOY_TEST_PG_DSN`**: test-only, read by
-  `backend/tests/test_migrations.py`. Unset, the Postgres half of the
-  dual-DB migration tests is skipped; the `backend-postgres` CI leg
-  (`.github/workflows/ci.yml`) sets it to a local `postgres:16` service
-  container and runs the full suite against both DBs.
+<details>
+<summary><b>Running from source</b></summary>
 
-The Playwright e2e harness (`frontend/playwright.config.ts`) sets its own
-throwaway environment for the backend it spawns: `PROXPLOY_DATA_DIR` and
-`PROXPLOY_DB_URL` pointed at a scratch `.e2e-data/` directory,
-`PROXPLOY_MASTER_KEY_FILE` alongside it, and
-`PROXPLOY_POLL_ENABLED=PROXPLOY_SCHEDULER_ENABLED=PROXPLOY_ALERTS_ENABLED=false`
-so the app doesn't try to reach a Proxmox host that isn't there.
-
-## Development
-
-### Backend
+Backend, FastAPI and SQLAlchemy:
 
 ```bash
 cd backend
@@ -190,52 +158,112 @@ python -m venv .venv && .venv/bin/pip install -e '.[dev]'
 .venv/bin/uvicorn --factory proxploy.main:create_app --reload --port 8000
 ```
 
-### Frontend
+Frontend, React 19 with Vite and TanStack Router:
 
 ```bash
 cd frontend
 npm install
-npm run dev   # vite dev server on :5173, proxies /api to :8000
+npm run dev   # vite on :5173, proxies /api to :8000
 ```
 
-### Tests
-
-Backend (unit + integration, excludes the two suites below):
+Tests:
 
 ```bash
-cd backend
-.venv/bin/python -m pytest tests/ -q -m "not pve_integration and not e2e"
+cd backend && .venv/bin/python -m pytest tests/ -q -m "not pve_integration and not e2e"
+cd frontend && npx vitest run --no-file-parallelism
+cd frontend && npx playwright test
 ```
 
-831 passed, 2 skipped, 4 deselected. `pve_integration` needs a disposable
-live Proxmox host (`PROXPLOY_TEST_PVE_*`) that doesn't exist in this
-environment; pytest's `e2e` marker is a cross-repo roundtrip against a local
-`proxploy-api`, not the Playwright suite below; don't confuse the two.
-`test_backups_sync.py::test_concurrent_stale_reads_enqueue_only_one_sync` is
-a known flake (a real concurrency test, timing-sensitive on a loaded box); 
-if it's the only failure, rerun before assuming something broke.
+`pve_integration` needs a disposable live Proxmox host (`PROXPLOY_TEST_PVE_*`).
+The `e2e` pytest marker is a cross-repo roundtrip against a local proxploy-api,
+which is not the Playwright suite. Vitest needs `--no-file-parallelism`; suites
+flake under its default parallelism.
 
-Frontend unit tests, **the `--no-file-parallelism` flag is required**;
-suites flake under vitest's default parallelism on this box:
+</details>
 
-```bash
-cd frontend
-npx vitest run --no-file-parallelism
-```
+<details>
+<summary><b>Configuration</b></summary>
 
-End-to-end (real Chromium via Playwright, against
-`backend/tests/e2e_server.py`'s fake PVE/SSH, spins up its own backend and
-frontend dev server, see `frontend/playwright.config.ts`):
+Settings are `pydantic-settings` with the prefix `PROXPLOY_`, defined in
+`backend/proxploy/config.py`. Defaults below are what a source checkout gets;
+the installer and the Docker image override what they need to.
 
-```bash
-cd frontend
-npx playwright test
-```
+| Variable | Default | Purpose |
+|---|---|---|
+| `PROXPLOY_DB_URL` | `sqlite:///./data/proxploy.db` | Database DSN. SQLite in WAL mode only. Proxploy is a single-box product and is not tested on another engine, and `SecretStore.ensure_key_file`'s guard against minting a fresh master key over a populated database keys off the SQLite file's existence. |
+| `PROXPLOY_DATA_DIR` | `./data` | Root for the database file, uploads, and other on-disk state. |
+| `PROXPLOY_MASTER_KEY_FILE` | `./data/master.key` | Root-only key file backing `SecretStore`, which encrypts stored credentials. |
+| `PROXPLOY_SESSION_COOKIE` | `pp_session` | Session cookie name. |
+| `PROXPLOY_CSRF_COOKIE` | `pp_csrf` | CSRF cookie name. |
+| `PROXPLOY_SESSION_TTL_HOURS` | `168` | Session lifetime. |
+| `PROXPLOY_COOKIE_SECURE` | `false` | Set by the installer once TLS terminates in front of the app. |
+| `PROXPLOY_ENV` | `dev` | `dev` or `prod`. Picks the default API base URL below. Any other value fails at startup rather than falling back quietly. |
+| `PROXPLOY_API_BASE_URL` | `https://api.proxploy.dev` in dev, `https://api.proxploy.com` in prod | Entitlements API base URL. An explicit value always wins. |
+| `PROXPLOY_ENT_EXTRA_KEYS_FILE` | unset | Extra entitlement verification keys. |
+| `PROXPLOY_SENTRY_DSN` | empty, reporting off | Opt-in crash reporting to Aspyre Labs' GlitchTip. The installer never sets it. Only the exception and stack trace are sent. `GET /api/v1/meta/version` reports whether it took effect. |
+| `PROXPLOY_CATALOG_SLUGS` | built-in list | App Store catalog slugs. |
+| `PROXPLOY_POLL_ENABLED` | `true` | Background Proxmox poller on or off. |
+| `PROXPLOY_POLL_INTERVAL_S` | `30.0` | Poller interval. |
+| `PROXPLOY_POLL_TIMEOUT_S` | `20.0` | Poller per-call timeout. |
+| `PROXPLOY_CONSOLE_TICKET_TTL_S` | `30.0` | Console ticket lifetime. |
+| `PROXPLOY_CONSOLE_IDLE_TIMEOUT_S` | `1800.0` | Console idle disconnect. |
+| `PROXPLOY_STORAGE_UPLOAD_MAX_BYTES` | 16 GiB | Maximum ISO upload size. |
+| `PROXPLOY_PVE_TASK_TIMEOUT_S` | `3600.0` | Ceiling for disk-bound Proxmox jobs such as clone, backup, restore, and upload. |
+| `PROXPLOY_BACKUP_SYNC_STALE_S` | `900.0` | How stale a backup-sync snapshot may be before it refreshes. |
+| `PROXPLOY_SCHEDULER_ENABLED` | `true` | Job scheduler on or off. |
+| `PROXPLOY_SCHEDULER_TICK_S` | `30.0` | Scheduler poll tick. |
+| `PROXPLOY_ALERTS_ENABLED` | `true` | Alert evaluation on or off. The poller still writes samples either way. |
+| `PROXPLOY_OIDC_DEFAULT_ROLE` | unset | If set, auto-provisions this role for first-time OIDC sign-ins. Unset means new OIDC users stay inactive until an admin activates them. |
+| `PROXPLOY_OIDC_DEFAULT_TEAM_SLUG` | `default` | Team new OIDC users join. |
+| `PROXPLOY_TOTP_PENDING_TTL_S` | `300.0` | How long a pending two-factor token stays redeemable. |
+| `PROXPLOY_MIGRATE_ASSUMED_BPS` | `80e6` | Assumed LAN rate, used only for the migration preflight estimate. |
+| `PROXPLOY_RELEASE_CHANNEL_URL` | GitHub releases URL | Base URL of the release channel. |
+| `PROXPLOY_RELEASE_PUBKEY_FILE` | unset | Path to a release public key, to verify against a non-default key. A PEM or its bare base64 body both parse. |
+| `PROXPLOY_INSTALL_SHAPE` | unset | Written by the installer. Unset means a source checkout, where self-update can check but not apply. |
+| `PROXPLOY_UPDATE_SCRIPT` | `/opt/proxploy/bin/proxploy-update` | Updater script run by `POST /meta/update`. |
+| `PROXPLOY_UPDATE_TIMEOUT_S` | `600.0` | Timeout for a self-update run. |
+| `PROXPLOY_SELF_CTID` | unset | Container id of Proxploy itself, so it can recognise and refuse to destroy itself. |
 
-## Cutting a release
+Two more exist outside the settings class. `PROXPLOY_IN_DOCKER` is set by the
+Docker image and forces the shape detector to report `docker`, which is what
+makes self-update refuse. `PROXPLOY_TEST_PG_DSN` is test-only and enables the
+Postgres leg of the migration tests.
 
-Not part of day-to-day development, see
-`packaging/publishing-a-release.md` for the full procedure (generate
-the release keypair, make the repo public, build the signed artifact with
-`packaging/build_release.sh`, publish the GitHub release, verify against a
-clean box).
+</details>
+
+<details>
+<summary><b>Verification keys</b></summary>
+
+Two public keys reach the app from outside, and both accept a full PEM or just
+its base64 body with the `-----BEGIN`/`-----END` lines removed.
+
+| Key | Where it comes from | What it verifies |
+|---|---|---|
+| Entitlement root key | `backend/proxploy/entitlements/keys.py`, plus the `ent_extra_keys_file` overlay | Entitlement certificates and tokens minted by proxploy-api |
+| Release signing key | `backend/proxploy/release_pubkey.pem`, or `PROXPLOY_RELEASE_PUBKEY_FILE` | The release manifest, before an update installs anything |
+
+A key in the overlay that does not parse is dropped with an error logged rather
+than raised, so one bad entry in an operator-supplied file cannot take the
+bundled set down with it. The dropped id then fails closed at verify time as an
+unknown key id. Watch for that log line if a token is rejected unexpectedly,
+because a dropped key and a key that was never added look identical from the
+outside. If the trusted set ends up empty, the app refuses to start rather than
+accepting everything.
+
+Neither key is secret. The private halves live in proxploy-api and in the
+release runbook, never in this repository.
+
+</details>
+
+## License
+
+Proxploy is free software under the [GNU Affero General Public License v3.0](LICENSE).
+
+You can run it, read it, change it, and share it. If you modify Proxploy and
+let other people use it over a network, the AGPL asks you to offer them the
+source of your version. The paid tiers are a licence for hosted entitlements,
+not a different set of source terms.
+
+<div align="center">
+<sub>Built by <a href="https://aspyrelabs.com">Aspyre Labs</a>. Proxmox and Proxmox VE are trademarks of Proxmox Server Solutions GmbH, which is not affiliated with this project.</sub>
+</div>
