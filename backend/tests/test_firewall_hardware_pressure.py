@@ -45,6 +45,8 @@ from contextlib import contextmanager
 
 from pathlib import Path
 
+import os
+
 import pytest
 
 from proxploy.config import Settings
@@ -55,7 +57,8 @@ from proxploy.services.firewall import (SCOPE_OBJECTS, cluster_loc, group_loc,
                                         guest_loc, node_loc)
 from proxploy.services.proxmox import ProxmoxClient, ProxmoxError
 
-pytestmark = pytest.mark.pve_integration
+from tests import livepve
+
 
 # Everything this file creates carries this prefix, in the name for objects and
 # in the comment for rules, so a leak is findable on the cluster. It is a label,
@@ -63,10 +66,14 @@ pytestmark = pytest.mark.pve_integration
 PX = "pxppress"
 
 # Guests this run may touch. vmid 105 is off limits and is deliberately absent.
-LXC_VMID, LXC_NODE = 104, "node1"           # wastebin
-QEMU_VMID, QEMU_NODE = 108, "node1"         # debian-test
-FOREIGN_VMID, FOREIGN_NODE = 109, "node2"   # actualbudget, an LXC, NOT on
-                                            # host 1's node
+LXC_VMID = livepve.guest_vmid("lxc")
+QEMU_VMID = livepve.guest_vmid("qemu")
+LXC_NODE = QEMU_NODE = livepve.node_or_none()
+_FOREIGN = livepve.foreign_guest()
+FOREIGN_VMID, FOREIGN_NODE = _FOREIGN if _FOREIGN else (None, None)
+
+pytestmark = [pytest.mark.pve_integration, livepve.live_only,
+              livepve.guests_required(LXC_VMID, QEMU_VMID)]
 
 # 109 is a CONTAINER: cluster_resources() on this cluster reports it as an lxc,
 # and this file used to describe it as a VM. Every foreign_* location below asks
@@ -90,44 +97,43 @@ class _Row:
         self.node_name = node_name
 
 
+class _Host:
+    def __init__(self, address, node_name, verify_tls):
+        self.id = 1
+        self.name = "live-pve"
+        self.address = address
+        self.node_name = node_name
+        self.cluster_name = None
+        self.verify_tls = verify_tls
+        self.tls_fingerprint = None
+
+
 # ------------------------------------------------------------------ fixtures
 
 @pytest.fixture(scope="module")
 def rig():
-    """(host, monitoring client, lifecycle client, monitoring token, lifecycle
-    token) from the first enrolled host's own stored tokens."""
-    s = Settings()
-    # Before the SecretStore below, not after: these two modules drive the
-    # developer's OWN cluster, read out of the dev database, and a machine with
-    # no data/ dir is simply not that machine. Opening the key file first threw
-    # FileNotFoundError('data/master.key') out of fixture setup, which is an
-    # ERROR rather than a skip, so the whole pve-integration job went red on
-    # every runner while its own step is named "skips cleanly when secrets are
-    # absent". Seen on CI 2026-08-25: 90 errors, 9 skipped, nothing actually
-    # run against hardware.
-    if not Path(s.master_key_file).exists():
-        pytest.skip("no dev database on this machine: these drive the "
-                    "developer's own enrolled cluster, not a fixture")
-    db = make_sessionmaker(make_engine(s))()
-    store = SecretStore(s.master_key_file)
-    host = db.query(Host).first()
-    if host is None:
-        pytest.skip("no enrolled host in the dev database")
+    def cap_token(cap: str) -> dict:
+        tid = livepve.env(f"PROXPLOY_TEST_PVE_{cap}_TOKEN_ID")
+        sec = livepve.env(f"PROXPLOY_TEST_PVE_{cap}_TOKEN_SECRET")
+        if not (tid and sec):
+            pytest.skip(f"needs PROXPLOY_TEST_PVE_{cap}_TOKEN_ID and _SECRET: "
+                        f"this suite pins what each capability can and cannot "
+                        f"do, so it needs one token per role, not one token")
+        return {"token_id": tid, "token_secret": sec}
 
-    def token(capability: str) -> dict:
-        cred = db.query(HostCredential).filter_by(
-            host_id=host.id, kind=f"api_token:{capability}").one_or_none()
-        if cred is None:
-            pytest.skip(f"host has no {capability} token configured")
-        return json.loads(store.decrypt(cred.encrypted_blob))
+    mon_tok = cap_token("MONITOR")
+    life_tok = cap_token("LIFECYCLE")
+    con_tok = cap_token("CONSOLE")
+    host = _Host(os.environ["PROXPLOY_TEST_PVE_URL"], livepve.node(),
+                 livepve.env("PROXPLOY_TEST_PVE_VERIFY", "0") == "1")
 
-    def client(tok: dict) -> ProxmoxClient:
-        return ProxmoxClient(host.address, tok["token_id"], tok["token_secret"],
+    def client(t: dict) -> ProxmoxClient:
+        return ProxmoxClient(host.address, t["token_id"], t["token_secret"],
                              verify_tls=host.verify_tls,
                              tls_fingerprint=host.tls_fingerprint)
 
-    mon_token, life_token = token("monitoring"), token("lifecycle")
-    return host, client(mon_token), client(life_token), mon_token, life_token
+    return (host, client(mon_tok), client(life_tok), mon_tok, life_tok,
+            client(con_tok))
 
 
 @pytest.fixture(scope="module")
@@ -146,6 +152,11 @@ def lifecycle(rig) -> ProxmoxClient:
 
 
 @pytest.fixture(scope="module")
+def console(rig) -> ProxmoxClient:
+    return rig[5]
+
+
+@pytest.fixture(scope="module")
 def lxc_loc(host) -> dict:
     return guest_loc(host, "lxc", LXC_VMID, _Row(LXC_NODE))
 
@@ -156,9 +167,9 @@ def qemu_loc(host) -> dict:
 
 
 @pytest.fixture(scope="module")
-def foreign_loc(host) -> dict:
-    """Guest 109, routed to its OWN node (node2), reached through host 1
-    (node1). Asked for as a VM although it is a container: see FOREIGN_VMID."""
+def foreign_loc(host) -> dict | None:
+    if FOREIGN_VMID is None:
+        return None
     return guest_loc(host, "qemu", FOREIGN_VMID, _Row(FOREIGN_NODE))
 
 
@@ -425,9 +436,10 @@ def run_snapshot(monitor, host, lxc_loc, qemu_loc, foreign_loc):
     """Every scope this module touches, as it was before the module ran. The
     last test compares against this. Presence only, never emptiness."""
     scopes = {"cluster": cluster_loc(),
-              "node1": node_loc("node1"), "node2": node_loc("node2"),
-              f"lxc {LXC_VMID}": lxc_loc, f"qemu {QEMU_VMID}": qemu_loc,
-              f"lxc {FOREIGN_VMID}": foreign_loc}
+              LXC_NODE: node_loc(LXC_NODE),
+              f"lxc {LXC_VMID}": lxc_loc, f"qemu {QEMU_VMID}": qemu_loc}
+    if foreign_loc is not None:
+        scopes[f"lxc {FOREIGN_VMID}"] = foreign_loc
     snap = {}
     for label, loc in scopes.items():
         snap[label] = (loc, _keys(monitor.firewall_rules(loc)),
@@ -1003,9 +1015,9 @@ def test_security_group_lifecycle_and_reference(monitor, lifecycle, made):
 # ------------------------------------------------------------ 7. guest scope
 
 @pytest.mark.parametrize("which", ["lxc", "qemu"])
-def test_guest_scope_full_surface(request, monitor, lifecycle, made, which):
+def test_guest_scope_full_surface(request, monitor, lifecycle, console, made, which):
     """Rules, aliases, IP sets, refs and log at guest scope, on a container
-    (104 wastebin) and on a VM (108 debian-test)."""
+    and on a VM, both named by PROXPLOY_TEST_PVE_LXC_VMID and _QEMU_VMID."""
     loc = request.getfixturevalue(f"{which}_loc")
     made.watch(loc)
 
@@ -1037,7 +1049,7 @@ def test_guest_scope_full_surface(request, monitor, lifecycle, made, which):
 
     # A guest firewall log exists even with the firewall off: PVE answers with a
     # single "no content" placeholder row rather than an empty list.
-    lines = monitor.firewall_log(loc, start=0, limit=5)
+    lines = console.firewall_log(loc, start=0, limit=5)
     assert isinstance(lines, list)
     assert all({"n", "t"} <= set(row) for row in lines)
 
@@ -1088,9 +1100,11 @@ def test_guest_options_reject_a_cluster_only_key(monitor, lifecycle, qemu_loc):
 
 # ------------------------------------------------------ 8. cross-node routing
 
+@livepve.cluster_only
 def test_guest_loc_routes_to_the_guests_own_node(host):
     """guest_loc must take the node from the guest's row, never from the host's
-    entry node. Host 1 is node1; guest 109 lives on node2.
+    entry node. The rig host is the entry node; the foreign guest lives on
+    another node.
 
     guest_loc is a pure function here, so the kind in these calls is only
     carried through to the dict and never checked by anything. 109 is a
@@ -1098,7 +1112,6 @@ def test_guest_loc_routes_to_the_guests_own_node(host):
 
     This test fails outright if guest_loc ever goes back to host.node_name.
     """
-    assert host.node_name == "node1", f"rig host is {host.node_name}, expected node1"
     routed = guest_loc(host, "qemu", FOREIGN_VMID, _Row(FOREIGN_NODE))
     assert routed["node"] == FOREIGN_NODE != host.node_name
 
@@ -1108,6 +1121,7 @@ def test_guest_loc_routes_to_the_guests_own_node(host):
     assert guest_loc(host, "qemu", FOREIGN_VMID)["node"] == host.node_name
 
 
+@livepve.cluster_only
 def test_firewall_endpoints_do_not_validate_the_node_in_the_path(monitor,
                                                                  lifecycle,
                                                                  host, made):
@@ -1117,7 +1131,8 @@ def test_firewall_endpoints_do_not_validate_the_node_in_the_path(monitor,
     lives in the cluster filesystem at /etc/pve/firewall/<vmid>.fw keyed by vmid
     alone. So the 500 that guest_loc's docstring warns about, which is real for
     the guest CONFIG endpoints that docstring came from, never fires here.
-    Writing guest 109 through node1 lands in the same file node2 reads.
+    Writing the foreign guest through the entry node lands in the same file
+    its own node reads.
 
     Nothing observable distinguishes a correctly routed firewall call from a
     misrouted one, which is exactly why the assertion above is on the location
@@ -1127,14 +1142,15 @@ def test_firewall_endpoints_do_not_validate_the_node_in_the_path(monitor,
     node-blind lookup makes work: this covers the wrong kind and the wrong node
     at once. See FOREIGN_VMID.
     """
-    wrong = guest_loc(host, "qemu", FOREIGN_VMID)                    # node1
-    right = guest_loc(host, "qemu", FOREIGN_VMID, _Row(FOREIGN_NODE))  # node2
+    wrong = guest_loc(host, "qemu", FOREIGN_VMID)
+    right = guest_loc(host, "qemu", FOREIGN_VMID, _Row(FOREIGN_NODE))
     assert wrong["node"] != right["node"]
     made.watch(right)
 
     comment = made.rule(wrong, {"type": "in", "action": "ACCEPT",
                                 "comment": f"{PX}-xnode"})
-    # Written through node1, readable through node2: one shared file.
+    # Written through the entry node, readable through the guest's own: one
+    # shared file.
     assert comment in _comments(monitor, right)
     assert _keys(monitor.firewall_rules(wrong)) == _keys(monitor.firewall_rules(right))
     assert monitor.firewall_options(wrong) == monitor.firewall_options(right)
@@ -1148,7 +1164,7 @@ def test_an_unknown_vmid_reads_as_empty_rather_than_404(monitor, host):
     PVE offers no safety net here, so the guard has to be ours: the routes reach
     these calls only through a row api/deps.py has already scoped to the team.
     """
-    ghost = guest_loc(host, "lxc", GHOST_VMID, _Row("node1"))
+    ghost = guest_loc(host, "lxc", GHOST_VMID, _Row(LXC_NODE))
     assert monitor.firewall_rules(ghost) == []
     assert _settings(monitor.firewall_options(ghost)) == {}
 
@@ -1161,7 +1177,7 @@ def test_an_unknown_vmid_reads_as_empty_rather_than_404(monitor, host):
 
 # --------------------------------------------------------------- 9. node log
 
-@pytest.mark.parametrize("node", ["node1", "node2"])
+@pytest.mark.parametrize("node", [n for n in (LXC_NODE, FOREIGN_NODE) if n])
 def test_node_log_paging(monitor, node):
     """The line cursor shape JobLog renders: a list of {n, t} with n counting
     from 1 and rising, and a start past the end returning an empty list rather
@@ -1220,7 +1236,7 @@ def test_refs_shape_at_cluster_scope(monitor, made):
 
 # ------------------------------------------- 11. what each scope really serves
 
-def test_scope_objects_matches_the_cluster(monitor, host, lxc_loc):
+def test_scope_objects_matches_the_cluster(monitor, console, host, lxc_loc):
     """SCOPE_OBJECTS is a measured table with no production caller, so measure
     it again against the real cluster.
 
@@ -1241,8 +1257,9 @@ def test_scope_objects_matches_the_cluster(monitor, host, lxc_loc):
     for scope, loc in cases.items():
         for obj, call in probes.items():
             served = obj in SCOPE_OBJECTS[scope]
+            client = console if (scope == "guest" and obj == "log") else monitor
             try:
-                call(monitor, loc)
+                call(client, loc)
             except ProxmoxError as e:
                 assert not served, f"{scope}/{obj} is in SCOPE_OBJECTS but failed: {e}"
                 assert "501 Not Implemented" in str(e), \

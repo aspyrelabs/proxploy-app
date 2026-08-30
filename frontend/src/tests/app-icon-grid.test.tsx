@@ -227,7 +227,7 @@ describe('AppIconGrid', () => {
     wrap([{ ...APP, node: 'node1', host_name: 'node1.lab.local' }])
     expect(screen.getByText('node1')).toBeInTheDocument()
     expect(screen.getByText('1 app')).toBeInTheDocument()
-    expect(screen.queryByText(/aspyrelabs\.local/)).toBeNull()
+    expect(screen.queryByText(/lab\.local/)).toBeNull()
   })
 
   it('falls back to the host name for an app whose node is not reported', () => {

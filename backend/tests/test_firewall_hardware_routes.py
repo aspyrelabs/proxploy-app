@@ -29,6 +29,7 @@ Measured on pve-manager 9.2.11 on 2026-08-22.
 from __future__ import annotations
 
 import json
+import os
 
 from pathlib import Path
 
@@ -42,12 +43,14 @@ from proxploy.secretstore import SecretStore
 from proxploy.services.firewall import (SCOPE_OBJECTS, cluster_loc, guest_loc,
                                         node_loc)
 from proxploy.services.proxmox import ProxmoxClient
+from tests import livepve
 from tests.test_firewall_hardware_pressure import (PX, QEMU_NODE, QEMU_VMID,
                                                    Made, _is_subsequence,
                                                    _keys, _Row,
                                                    restored_options)
 
-pytestmark = pytest.mark.pve_integration
+pytestmark = [pytest.mark.pve_integration, livepve.live_only,
+              livepve.guests_required(QEMU_VMID)]
 
 PASSWORD = "Correct-Horse-Battery-9"
 
@@ -92,38 +95,13 @@ def rig(tmp_path_factory):
     """
     from tests.support import make_app
 
-    s = Settings()
-    # Before the SecretStore below, not after: these two modules drive the
-    # developer's OWN cluster, read out of the dev database, and a machine with
-    # no data/ dir is simply not that machine. Opening the key file first threw
-    # FileNotFoundError('data/master.key') out of fixture setup, which is an
-    # ERROR rather than a skip, so the whole pve-integration job went red on
-    # every runner while its own step is named "skips cleanly when secrets are
-    # absent". Seen on CI 2026-08-25: 90 errors, 9 skipped, nothing actually
-    # run against hardware.
-    if not Path(s.master_key_file).exists():
-        pytest.skip("no dev database on this machine: these drive the "
-                    "developer's own enrolled cluster, not a fixture")
-    dev = make_sessionmaker(make_engine(s))()
-    store = SecretStore(s.master_key_file)
-    src = dev.query(Host).first()
-    if src is None:
-        pytest.skip("no enrolled host in the dev database")
-    tokens = {}
-    # console is needed for the guest firewall log, which PVE gates behind
-    # VM.Console rather than VM.Audit. Without it that one route answers "no
-    # console API token configured" while every other read works, which reads
-    # as a broken route rather than a fixture that copied two of three tokens.
-    for cap in ("monitoring", "lifecycle", "console"):
-        cred = dev.query(HostCredential).filter_by(
-            host_id=src.id, kind=f"api_token:{cap}").one_or_none()
-        if cred is None:
-            pytest.skip(f"host has no {cap} token configured")
-        tokens[cap] = json.loads(store.decrypt(cred.encrypted_blob))
-    fields = {k: getattr(src, k) for k in
-              ("name", "address", "node_name", "cluster_name", "verify_tls",
-               "tls_fingerprint")}
-    dev.close()
+    tok = {"token_id": os.environ["PROXPLOY_TEST_PVE_TOKEN_ID"],
+           "token_secret": os.environ["PROXPLOY_TEST_PVE_TOKEN_SECRET"]}
+    tokens = {cap: tok for cap in ("monitoring", "lifecycle", "console")}
+    fields = {"name": "live-pve", "address": os.environ["PROXPLOY_TEST_PVE_URL"],
+              "node_name": livepve.node(), "cluster_name": None,
+              "verify_tls": livepve.env("PROXPLOY_TEST_PVE_VERIFY", "0") == "1",
+              "tls_fingerprint": None}
 
     app = make_app(tmp_path_factory.mktemp("fwroutes"))  # no fake: real factory
     with TestClient(app) as c:
@@ -194,7 +172,7 @@ def run_snapshot(rig):
     # this row does, so None never gets dereferenced. Same trick in the two
     # guest-scope tests below.
     scopes = {"cluster": cluster_loc(),
-              "node1": node_loc(rig["ids"]["node"]),
+              "node": node_loc(rig["ids"]["node"]),
               f"qemu {QEMU_VMID}": guest_loc(None, "qemu", QEMU_VMID,
                                              _Row(QEMU_NODE))}
     snap = {label: (loc, _keys(monitor.firewall_rules(loc)))
@@ -387,6 +365,7 @@ def test_the_enrolled_host_can_write_its_own_node_with_no_poll_yet(rig, c, ids,
                        c.get(f"{base}/rules").json()["rules"]]
 
 
+@livepve.cluster_only
 def test_a_peer_of_the_real_cluster_is_reachable_cold_and_warm(rig, c, ids):
     """The other node of the real cluster, through the host enrolled at the
     first one, both before and after a poll.

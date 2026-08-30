@@ -703,7 +703,7 @@ describe('InstallDialog', () => {
     })
     renderDialog()
     const hostSelect = await screen.findByRole('combobox', { name: /host/i })
-    const unreachable = within(hostSelect).getByText(/node1\.aspyrelabs\.local/) as HTMLOptionElement
+    const unreachable = within(hostSelect).getByText(/node1\.lab\.local/) as HTMLOptionElement
     const reachable = within(hostSelect).getByText('node2.lab.local') as HTMLOptionElement
     expect(unreachable.disabled).toBe(true)
     expect(unreachable.textContent).toMatch(/unreachable/i)

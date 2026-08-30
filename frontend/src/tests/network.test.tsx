@@ -369,7 +369,7 @@ describe('NicForm addressing', () => {
     wrapNic(<NicForm nic={NIC_VM as never} bridges={['vmbr0']} onClose={() => {}} />)
     expect(screen.queryByLabelText(/IPv4 address/i)).toBeNull()
     expect(screen.queryByLabelText(/address and prefix/i)).toBeNull()
-    expect(screen.getByText(/192\.168\.192\.77/)).toBeInTheDocument()
+    expect(screen.getByText(/192\.168\.50\.77/)).toBeInTheDocument()
   })
 
   it('shows nothing at all when Proxmox does not know the address', () => {

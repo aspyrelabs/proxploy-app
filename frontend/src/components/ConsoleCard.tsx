@@ -70,7 +70,7 @@ export function ConsoleCard() {
       <div className="mt-4 rounded-ctl border border-line-soft p-3 font-mono"
         style={{ background: theme.background, color: theme.foreground,
                  fontSize: `${prefs.fontSize}px` }}>
-        <div><span style={{ color: theme.green }}>operator@node1</span>:~$ uptime</div>
+        <div><span style={{ color: theme.green }}>operator@pve</span>:~$ uptime</div>
         <div>14:22:07 up 9 days,  2:11,  1 user,  load average: 0.14</div>
         <div><span style={{ color: theme.red }}>error</span>{' '}
           <span style={{ color: theme.yellow }}>warning</span>{' '}

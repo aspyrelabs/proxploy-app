@@ -51,6 +51,35 @@ def scratch_range() -> range:
     return range(lo, hi + 1)
 
 
+def guest_vmid(kind: str) -> int | None:
+    raw = env(f"PROXPLOY_TEST_PVE_{kind.upper()}_VMID")
+    return int(raw) if raw else None
+
+
+def node_or_none() -> str | None:
+    return env("PROXPLOY_TEST_PVE_NODE")
+
+
+def guests_required(*vmids) -> pytest.MarkDecorator:
+    return pytest.mark.skipif(
+        not all(vmids),
+        reason="needs PROXPLOY_TEST_PVE_LXC_VMID and PROXPLOY_TEST_PVE_QEMU_VMID: "
+               "existing guests on the test node this suite may attach firewall "
+               "rules to")
+
+
+def foreign_guest() -> tuple[int, str] | None:
+    vmid, node_name = (env("PROXPLOY_TEST_PVE_FOREIGN_VMID"),
+                       env("PROXPLOY_TEST_PVE_FOREIGN_NODE"))
+    return (int(vmid), node_name) if vmid and node_name else None
+
+
+cluster_only = pytest.mark.skipif(
+    foreign_guest() is None,
+    reason="needs a second node in the same cluster: set "
+           "PROXPLOY_TEST_PVE_FOREIGN_VMID and PROXPLOY_TEST_PVE_FOREIGN_NODE")
+
+
 def assert_scratch(vmid: int) -> int:
     """Guard every destructive call site. A test that reaches outside the
     operator's declared scratch range is a bug in the test, not a finding."""

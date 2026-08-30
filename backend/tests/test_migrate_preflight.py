@@ -369,11 +369,11 @@ def test_a_shared_pool_the_source_does_not_serve_is_not_the_shared_strategy(
     """`nodes` on a storage restricts which nodes carry it, and `GET /storage`
     reports the whole cluster's CONFIG regardless.
 
-    Real shape, from the `lab-cluster` cluster on 2026-08-18 (doc 12 check 7): the
-    NFS pool `nfs-shared` was restricted with `--nodes node2`, and preflight
-    answered `shared_storage: nfs-shared` for a migration OFF node1, which
-    cannot see it. `pvesm status` on node1 called that same pool `disabled` in
-    the same minute. STRATEGY_SHARED would then vzdump to a pool the source
+    Real shape, seen on hardware on 2026-08-18 (doc 12 check 7): the NFS pool
+    `nfs-shared` was restricted to the target node alone, and preflight
+    answered `shared_storage: nfs-shared` for a migration OFF the source node,
+    which cannot see it. `pvesm status` on the source called that same pool
+    `disabled` in the same minute. STRATEGY_SHARED would then vzdump to a pool the source
     cannot write, refusing on a storage error while a working transfer path
     existed. No fixture had ever carried the field.
     """
