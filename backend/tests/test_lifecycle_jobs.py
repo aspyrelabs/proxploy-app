@@ -1,6 +1,7 @@
 """Lifecycle job handlers over the ProxmoxClient (doc 10 Phase 3)."""
 import asyncio
 import json
+import time
 
 from proxploy.models import App, Host, HostCredential, Job, JobEvent, Vm
 
@@ -759,17 +760,20 @@ def test_the_guest_stays_working_for_the_settle_pause(tmp_path, monkeypatch):
         with app.state.sessionmaker() as db:
             db.get(App, app_id).status_cached = "running"
             db.commit()
-        monkeypatch.setattr(m, "SETTLE_DELAY_S", 0.4)
+        monkeypatch.setattr(m, "SETTLE_DELAY_S", 3.0)
         with app.state.sessionmaker() as db:
             job_id = backend.enqueue(db, kind="app.stop", target_type="app",
                                      target_id=app_id, params={"target_id": app_id}).id
-        # Mid-pause: Proxmox already says stopped, the operator still sees
-        # Working.
-        await asyncio.sleep(0.2)
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
+            with app.state.sessionmaker() as db:
+                if db.get(App, app_id).status_cached == "stopped":
+                    break
+            await asyncio.sleep(0.02)
         with app.state.sessionmaker() as db:
             assert db.get(App, app_id).status_cached == "stopped"
             assert m.busy_guests(db, utcnow())[("app", app_id)] == "pending"
-        await backend.wait(job_id, timeout=10)
+        await backend.wait(job_id, timeout=30)
         with app.state.sessionmaker() as db:
             assert ("app", app_id) not in m.busy_guests(db, utcnow())
 
