@@ -1,0 +1,50 @@
+Proxploy
+Copyright (C) 2026 Aspyre Labs
+
+This product is licensed under the GNU Affero General Public License v3.0.
+See the LICENSE file for the full terms.
+
+
+TRADEMARKS
+
+"Proxploy" and "Aspyre Labs", together with the Proxploy logo and wordmark
+(including the artwork in frontend/public/proxploy-logo-*.svg and
+frontend/public/proxploy-favicon-*.svg), are trademarks of Aspyre Labs.
+
+The AGPL grants you rights in the SOURCE CODE. It does not grant any right to
+use these marks. The two are separate, and this notice exists so the boundary
+is stated rather than assumed.
+
+What this means in practice:
+
+  You may, without asking us:
+
+    - use, study, modify and redistribute the code under the AGPL
+    - run a modified version, privately or commercially
+    - say truthfully what your software is, for example "based on Proxploy"
+      or "a fork of Proxploy", where that describes the relationship rather
+      than naming your product
+
+  You may not, without our written permission:
+
+    - name your product, service, domain or package "Proxploy", or any name
+      confusingly similar to it
+    - keep the Proxploy logo, wordmark or favicon in a redistributed build
+    - present a modified version in a way that suggests Aspyre Labs published
+      it, endorsed it, or supports it
+
+Removing the marks does not affect any of your rights under the AGPL. Rebrand
+the artwork and the name, and the code is yours to redistribute.
+
+
+THIRD-PARTY MARKS
+
+Proxmox and Proxmox VE are trademarks of Proxmox Server Solutions GmbH, which
+is not affiliated with this project and does not endorse it. Proxploy is an
+independent product that talks to the Proxmox VE API.
+
+The App Store catalog is sourced from the community-scripts/ProxmoxVE project.
+Those scripts are the work of their own authors and carry their own licences.
+
+
+Questions about trademark use: support@proxploy.com

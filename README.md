@@ -259,6 +259,12 @@ let other people use it over a network, the AGPL asks you to offer them the
 source of your version. The paid tiers are a licence for hosted entitlements,
 not a different set of source terms.
 
+The name and the artwork are a separate matter from the code. "Proxploy" and
+the Proxploy logo are trademarks of Aspyre Labs, and the AGPL grants no right
+to use them. Fork it, change it, ship it, and say truthfully that it is based
+on Proxploy. Just give your version its own name and its own logo, so nobody
+downloading it thinks we published it. Full terms in [NOTICE](NOTICE).
+
 <div align="center">
 <sub>Built by <a href="https://aspyrelabs.com">Aspyre Labs</a>. Proxmox and Proxmox VE are trademarks of Proxmox Server Solutions GmbH, which is not affiliated with this project.</sub>
 </div>
