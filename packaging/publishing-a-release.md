@@ -24,11 +24,24 @@ All three come off the same two-row table, written down in exactly two places:
 server answers. Everything below is written for a **dev** release; the prod
 cutover is Step 10.
 
-**Current state, stated plainly:** the release private key does not exist yet.
-Both shipped copies of the public key are placeholders and verify nothing a
-real release signs. Step 1 replaces them. Do not skip Step 1 and sign with the
-dev/test key: nothing installed from a release built that way is verifiable by
-anyone who trusts the shipped pubkey.
+**Before you do anything below, ask the channel, not this file.** Whether a
+key is real and whether the channel is signed by it are facts with a command
+attached, and any answer written here goes stale the first time someone signs
+something:
+
+```bash
+d=$(mktemp -d)
+curl -fsSL -o "$d/manifest.json"     https://proxploy.com/releases/latest/manifest.json
+curl -fsSL -o "$d/manifest.json.sig" https://proxploy.com/releases/latest/manifest.json.sig
+openssl pkeyutl -verify -pubin -inkey backend/proxploy/release_pubkey.pem \
+  -rawin -in "$d/manifest.json" -sigfile "$d/manifest.json.sig"
+```
+
+"Signature Verified Successfully" means the shipped public key verifies what
+the channel is serving, so Step 1 is a ROTATION and rotating breaks every
+installed copy until it updates through a release signed by the old key. Any
+other output means the shipped key does not match the channel, and Step 1 is
+what fixes it.
 
 ## 1. Generate the release keypair, offline
 

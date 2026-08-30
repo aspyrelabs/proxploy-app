@@ -128,7 +128,7 @@ tar "${tar_nometa[@]}" \
     --exclude='./scripts' --exclude='./scripts/*' --exclude='.gitignore' \
     --exclude='*.egg-info' --exclude='.git' --exclude='._*' \
     --exclude='.DS_Store' \
-    -cf - -C "$backend_dir" . | tar "${tar_nometa[@]}" xf - -C "$stage/backend"
+    -cf - -C "$backend_dir" . | tar "${tar_nometa[@]}" -xf - -C "$stage/backend"
 
 log "staging frontend/dist/..."
 mkdir -p "$stage/frontend"
@@ -137,7 +137,7 @@ mkdir -p "$stage/frontend"
 mkdir -p "$stage/frontend/dist"
 tar "${tar_nometa[@]}" --exclude='._*' --exclude='.DS_Store' \
     -cf - -C "$frontend_dir/dist" . \
-  | tar "${tar_nometa[@]}" xf - -C "$stage/frontend/dist"
+  | tar "${tar_nometa[@]}" -xf - -C "$stage/frontend/dist"
 
 # The installer reads proxploy-update, common.sh, proxploy.service and the
 # Caddyfile template out of the unpacked release rather than out of its own
@@ -223,7 +223,7 @@ secrets=$(find "$stage" \( -name '*.key' -o -name '*.db' -o -name '*.db-wal' \
 
 tarball_name="proxploy-$version.tar.gz"
 log "building $tarball_name..."
-tar "${tar_nometa[@]}" czf "$out/$tarball_name" -C "$stage" backend frontend packaging
+tar "${tar_nometa[@]}" -czf "$out/$tarball_name" -C "$stage" backend frontend packaging
 
 # And check the artifact itself, not just the tree it came from: the flags
 # above are probed, so on a tar that has none of them this is the only thing

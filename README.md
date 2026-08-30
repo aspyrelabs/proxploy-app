@@ -90,11 +90,6 @@ trace, never request bodies, headers, cookies, or addresses.
 
 ## Install
 
-> [!NOTE]
-> The one-liner fetches a signed release from `proxploy.com`, which is not
-> serving the release channel yet. Until the first public release is cut, use
-> the Docker shape or run from source.
-
 **On a Proxmox node.** Creates a container, installs Proxploy inside it, and
 puts Caddy in front with a real certificate if you pass `--hostname`:
 

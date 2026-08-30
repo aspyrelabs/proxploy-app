@@ -132,6 +132,17 @@ jobs:
       # proxploy-update use. A bare `shellcheck <path>` SC1091s on every one
       # of them: established while implementing Tasks 7 and 9.
       - run: shellcheck -x -P SCRIPTDIR install.sh packaging/proxploy-update packaging/lib/*.sh packaging/tests/*.sh packaging/build_release.sh
+      # bsdtar only accepts a bundled mode (`xf`, `czf`) as the FIRST argument.
+      # After the tar_nometa long options it reads as a filename and the run
+      # dies with "Must specify one of -c, -r, -t, -u, -x". GNU tar accepts it
+      # anywhere, so this runner cannot fail on it and shellcheck cannot see
+      # it: releases are built on macOS, where it is fatal.
+      - name: tar mode must keep its dash
+        run: |
+          if grep -nE 'tar "\$\{tar_nometa\[@\]\}" [a-z]' packaging/build_release.sh; then
+            echo "::error::dashless tar mode after long options: use -xf, not xf" >&2
+            exit 1
+          fi
 
   install-harness:
     if: github.event_name != 'push'
