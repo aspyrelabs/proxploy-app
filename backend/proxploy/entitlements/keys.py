@@ -23,6 +23,10 @@ from proxploy.pubkey import load_public_key, to_pem
 
 logger = logging.getLogger(__name__)
 
+
+class NoTrustedRoots(RuntimeError):
+    pass
+
 BUNDLED_ROOT_KEYS: dict[str, str] = {
     "prod-root-2026-09": "MCowBQYDK2VwAyEA3PBkcXK0TcqeNIacFipn4oWfcsV3T2+wjLKkm2U1xPs="
 }
@@ -46,4 +50,11 @@ def load_root_keys(settings) -> dict[str, str]:
             logger.error("entitlement root key %r is unreadable and was "
                          "dropped; certs signed with it will be rejected "
                          "as an unknown root key id (%s)", kid, type(e).__name__)
+    if not out:
+        raise NoTrustedRoots(
+            f"no usable entitlement root key out of {len(keys)} tried: "
+            f"{sorted(keys)}. Every value must be an Ed25519 PUBLIC key, "
+            "which starts MCow; a private key starts MC4CAQ and is the usual "
+            "cause. Starting without a root would leave every install on the "
+            "builtin tier with no way to tell.")
     return out

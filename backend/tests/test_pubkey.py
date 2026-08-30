@@ -72,3 +72,31 @@ def test_a_broken_overlay_key_is_dropped_not_fatal(tmp_path, keypair, caplog):
     assert set(BUNDLED_ROOT_KEYS) <= set(keys), \
         "a bad overlay entry must not drop bundled keys"
     assert "bad-kid" in caplog.text
+
+
+def test_a_private_key_in_the_root_set_refuses_to_start(keypair, monkeypatch, caplog):
+    """The mistake the ceremony invites: gen_signing_key.py prints both halves
+    and the private one is the eye-catching one-liner. Pasted here it parses as
+    nothing, gets dropped, and the app would otherwise start with an empty root
+    set and put every install on the builtin tier with nothing saying why."""
+    import base64 as b64
+    from types import SimpleNamespace
+
+    from cryptography.hazmat.primitives.serialization import (
+        Encoding, NoEncryption, PrivateFormat,
+    )
+
+    from proxploy.entitlements import keys as keymod
+
+    priv, _, _ = keypair
+    private_body = b64.b64encode(priv.private_bytes(
+        Encoding.DER, PrivateFormat.PKCS8, NoEncryption())).decode()
+    monkeypatch.setattr(keymod, "BUNDLED_ROOT_KEYS",
+                        {"prod-root-2026-09": private_body})
+
+    with pytest.raises(keymod.NoTrustedRoots) as exc:
+        keymod.load_root_keys(SimpleNamespace(ent_extra_roots_file=None))
+
+    assert "MC4CAQ" in str(exc.value)
+    assert "prod-root-2026-09" in str(exc.value)
+    assert "unreadable" in caplog.text
