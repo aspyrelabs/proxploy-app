@@ -170,10 +170,10 @@ printf '__version__ = "%s"\n' "$version" > "$stage/backend/proxploy/__init__.py"
 # it shipped with (proxploy-update reads release_pubkey.pem out of
 # $PP_CURRENT), so that file has to be the public half of whatever key signed
 # the release carrying it. Deriving it here guarantees that. Maintaining it as
-# a hand-committed file did not: the checked-in placeholder matched only
-# packaging/tests/DEV_ONLY_release_key.pem, which is gitignored, so the
-# upgrade harness verified fine on the one box holding that key and failed
-# everywhere else with "manifest signature is not valid".
+# a hand-committed file did not: the checked-in placeholder matched only a
+# gitignored local key, so the upgrade harness verified fine on the one box
+# holding that key and failed everywhere else with "manifest signature is
+# not valid".
 log "baking the public half of --key into the release..."
 openssl pkey -in "$key" -pubout -out "$stage/backend/proxploy/release_pubkey.pem"
 
