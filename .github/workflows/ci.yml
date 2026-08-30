@@ -1,9 +1,24 @@
 name: ci
-# Manual only. The push and weekly-schedule triggers were removed on
-# 2026-08-30 because the GitHub Actions allowance ran out; restore them
-# from git history when it resets.
+# A push runs frontend, e2e and backend, and only when it touched code they
+# cover. Every other job carries `if: github.event_name != 'push'`, so a
+# dispatch or the weekly schedule runs the whole workflow instead, licence
+# audits and the disposable-PVE matrix included. That split is why a manual run
+# is far heavier than a push run, and why hardware being down can only redden a
+# dispatch, never a push.
 on:
   workflow_dispatch:
+  schedule: [{cron: "17 3 * * 1"}]   # weekly: catches upstream/licensing drift
+  push:
+    branches: [main]
+    paths:
+      - 'frontend/**'
+      # The e2e job boots the real backend (playwright.config.ts webServer),
+      # so a server-side change can break it with no frontend file touched.
+      - 'backend/proxploy/**'
+      - 'backend/tests/**'
+      - 'backend/pyproject.toml'
+      - 'backend/scripts/**'
+      - '.github/workflows/ci.yml'
 
 jobs:
   backend:
