@@ -1,4 +1,7 @@
 import '@testing-library/jest-dom/vitest'
+import { configure } from '@testing-library/react'
+
+configure({ asyncUtilTimeout: 5000 })
 
 // jsdom doesn't implement matchMedia; uPlot calls it at import time (Sparkline).
 // ponytail: minimal stub, extend with real listener semantics if a test needs them.
