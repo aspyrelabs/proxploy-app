@@ -1,24 +1,15 @@
 name: ci
-# A push runs frontend, e2e and backend, and only when it touched code they
-# cover. Every other job carries `if: github.event_name != 'push'`, so a
-# dispatch or the weekly schedule runs the whole workflow instead, licence
-# audits and the disposable-PVE matrix included. That split is why a manual run
-# is far heavier than a push run, and why hardware being down can only redden a
-# dispatch, never a push.
+# Manual only, by the owner's standing preference: no push trigger, no
+# schedule. Run it from the Actions tab or `gh workflow run ci.yml`.
+#
+# Every job carries `if: github.event_name != 'push'`, which is now always
+# true, so one dispatch runs the whole workflow: the licence audits, the
+# shellcheck and install harnesses, the Chromium geometry harness, and the
+# disposable-PVE matrix. That matrix needs the pve8/pve9 secrets to point at
+# reachable boxes; it skips cleanly when they are absent, but goes red when
+# they are set and the hardware is off.
 on:
   workflow_dispatch:
-  schedule: [{cron: "17 3 * * 1"}]   # weekly: catches upstream/licensing drift
-  push:
-    branches: [main]
-    paths:
-      - 'frontend/**'
-      # The e2e job boots the real backend (playwright.config.ts webServer),
-      # so a server-side change can break it with no frontend file touched.
-      - 'backend/proxploy/**'
-      - 'backend/tests/**'
-      - 'backend/pyproject.toml'
-      - 'backend/scripts/**'
-      - '.github/workflows/ci.yml'
 
 jobs:
   backend:
