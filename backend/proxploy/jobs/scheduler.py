@@ -253,7 +253,7 @@ SYSTEM_SCHEDULES: tuple[dict, ...] = (
     {"name": "Usage cleanup", "job_kind": "metrics.maintain",
      "cron": "7 * * * *", "timezone": "UTC", "params": {}},
     {"name": "Session cleanup", "job_kind": "sessions.cleanup",
-     "cron": "15 3 * * *", "timezone": "UTC", "params": {}},
+     "cron": "15 * * * *", "timezone": "UTC", "params": {}},
     {"name": "Job history cleanup", "job_kind": "jobs.prune",
      "cron": "30 3 * * *", "timezone": "UTC", "params": {"keep_days": 90}},
     {"name": "Database compaction", "job_kind": "db.compact",

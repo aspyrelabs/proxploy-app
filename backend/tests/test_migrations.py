@@ -457,3 +457,32 @@ def test_backfill_of_app_category_and_web_port(tmp_path):
     # Re-running changes nothing, which is the whole idempotency claim.
     backfill()
     assert rows() == first
+
+
+def test_retime_leaves_an_operator_timed_row_alone(tmp_path):
+    from proxploy.config import Settings
+    from proxploy.db import run_migrations
+    from proxploy.migrations.versions.d4f60b1a83c7_hourly_session_sweep import (
+        NEW, OLD, retime_sql)
+
+    db_url = f"sqlite:///{tmp_path}/r.db"
+    run_migrations(Settings(db_url=db_url))
+    eng = create_engine(db_url)
+    try:
+        with eng.begin() as c:
+            for name, cron in (("Session cleanup", OLD), ("Ours", "0 2 * * 0")):
+                c.exec_driver_sql(
+                    "INSERT INTO schedules (name, job_kind, cron, timezone, "
+                    "enabled, next_run_at, created_at, updated_at) VALUES "
+                    "(?, 'sessions.cleanup', ?, 'UTC', 1, '2026-08-30 03:15:00', "
+                    "'2026-08-30 00:00:00', '2026-08-30 00:00:00')", (name, cron))
+            c.exec_driver_sql(retime_sql(OLD, NEW))
+            rows = dict(c.exec_driver_sql(
+                "SELECT name, cron FROM schedules").fetchall())
+            nxt = c.exec_driver_sql(
+                "SELECT next_run_at FROM schedules WHERE name = 'Session cleanup'"
+            ).scalar()
+        assert rows == {"Session cleanup": NEW, "Ours": "0 2 * * 0"}
+        assert nxt is None, "scheduler.prime() only recomputes a cleared next_run_at"
+    finally:
+        eng.dispose()
