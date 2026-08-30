@@ -12,7 +12,6 @@ from one screen that anyone on your team can use.
 
 [![CI](https://github.com/aspyrelabs/proxploy-app/actions/workflows/ci.yml/badge.svg)](https://github.com/aspyrelabs/proxploy-app/actions/workflows/ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/aspyrelabs/proxploy-app?style=flat-square&color=F8B340&label=release)](https://github.com/aspyrelabs/proxploy-app/releases)
-[![Stars](https://img.shields.io/github/stars/aspyrelabs/proxploy-app?style=flat-square&color=F8B340)](https://github.com/aspyrelabs/proxploy-app/stargazers)
 [![License: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0-F8B340?style=flat-square)](LICENSE)
 [![Docs](https://img.shields.io/badge/docs-docs.proxploy.com-F8B340?style=flat-square)](https://docs.proxploy.com)
 
