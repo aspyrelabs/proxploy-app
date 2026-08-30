@@ -24,7 +24,7 @@ from proxploy.pubkey import load_public_key, to_pem
 logger = logging.getLogger(__name__)
 
 BUNDLED_ROOT_KEYS: dict[str, str] = {
-    "dev-root-2026-08": "MCowBQYDK2VwAyEA3NOMW8kyo7nHgNnqglZiqEjDI68uy/ZTMdbOQhiC9U0=",
+    "prod-root-2026-09": "MCowBQYDK2VwAyEA3PBkcXK0TcqeNIacFipn4oWfcsV3T2+wjLKkm2U1xPs="
 }
 
 
