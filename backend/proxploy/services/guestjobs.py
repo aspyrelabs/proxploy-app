@@ -239,31 +239,153 @@ def _create_params(params: dict) -> dict:
     Deliberately opinionated defaults rather than a passthrough of arbitrary PVE
     keys: a caller posting raw qemu config would be an unvalidated write to the
     hypervisor."""
-    iso = params.get("iso")
+    p = params
+    iso = p.get("iso")
+    disk_bus = p.get("disk_bus") or "scsi"
+    disk_key = f"{disk_bus}0"
 
     def _net0(p: dict) -> str:
         # PVE spells a VLAN on a guest NIC as `,tag=N` inside the netN string
         # (same grammar services/netconfig.py round-trips for edits). Absent or
         # falsy tag means untagged: never emit `tag=` with an empty value.
-        spec = f"virtio,bridge={p.get('bridge') or 'vmbr0'}"
+        model = p.get("net_model") or "virtio"
+        mac = p.get("net_macaddr")
+        spec = f"{model}={mac}" if mac else model
+        spec += f",bridge={p.get('bridge') or 'vmbr0'}"
         tag = p.get("vlan_tag")
-        return f"{spec},tag={int(tag)}" if tag else spec
+        if tag:
+            spec += f",tag={int(tag)}"
+        if p.get("net_firewall"):
+            spec += ",firewall=1"
+        mtu = p.get("net_mtu")
+        if mtu:
+            spec += f",mtu={int(mtu)}"
+        queues = p.get("net_queues")
+        if queues:
+            spec += f",queues={int(queues)}"
+        rate = p.get("net_rate")
+        if rate:
+            spec += f",rate={rate}"
+        if p.get("net_link_down"):
+            spec += ",link_down=1"
+        return spec
+
+    disk_val = f"{p.get('storage') or 'local-lvm'}:{int(p.get('disk_gb', 32))}"
+    cache = p.get("disk_cache")
+    if cache:
+        disk_val += f",cache={cache}"
+    aio = p.get("disk_aio")
+    if aio:
+        disk_val += f",aio={aio}"
+    if p.get("disk_discard"):
+        disk_val += ",discard=on"
+    if p.get("disk_iothread"):
+        disk_val += ",iothread=1"
+    if p.get("disk_ssd"):
+        disk_val += ",ssd=1"
+    if not p.get("disk_backup", True):
+        disk_val += ",backup=0"
+    if not p.get("disk_replicate", True):
+        disk_val += ",replicate=0"
+    for suffix, key in (("mbps_rd", "disk_mbps_rd"), ("mbps_wr", "disk_mbps_wr"),
+                        ("iops_rd", "disk_iops_rd"), ("iops_wr", "disk_iops_wr")):
+        v = p.get(key)
+        if v is not None:
+            disk_val += f",{suffix}={v}"
 
     call = {
-        "vmid": int(params["vmid"]),
-        "name": params["name"],
-        "cores": int(params["cores"]),
-        "sockets": 1,
-        "memory": int(params["memory_mb"]),
-        "ostype": params.get("ostype") or "l26",
-        "scsihw": "virtio-scsi-single",
-        "scsi0": f"{params['storage']}:{int(params['disk_gb'])}",
-        "net0": _net0(params),
-        "boot": "order=scsi0;ide2" if iso else "order=scsi0",
+        "vmid": int(p["vmid"]),
+        "name": p["name"],
+        "cores": int(p.get("cores", 2)),
+        "sockets": int(p.get("sockets", 1)),
+        "memory": int(p.get("memory_mb", 2048)),
+        "ostype": p.get("ostype") or "l26",
+        "scsihw": p.get("scsihw") or "virtio-scsi-single",
+        disk_key: disk_val,
+        "boot": f"order=ide2;{disk_key}" if iso else f"order={disk_key}",
     }
+
+    if p.get("machine") == "q35":
+        call["machine"] = "q35"
+    if p.get("bios") == "ovmf":
+        call["bios"] = "ovmf"
+    vga = p.get("vga")
+    if vga:
+        call["vga"] = vga
+
+    if p.get("efi_disk"):
+        pre = 1 if p.get("efi_pre_enrolled_keys", True) else 0
+        call["efidisk0"] = (f"{p.get('efi_storage')}:1,efitype=4m,"
+                            f"pre-enrolled-keys={pre}")
+    if p.get("tpm"):
+        call["tpmstate0"] = f"{p.get('tpm_storage')}:1,version={p.get('tpm_version') or 'v2.0'}"
+    if p.get("agent"):
+        agent_val = f"enabled=1,type={p.get('agent_type') or 'virtio'}"
+        if p.get("agent_fstrim"):
+            agent_val += ",fstrim_cloned_disks=1"
+        call["agent"] = agent_val
+
     if iso:
         call["ide2"] = f"{iso},media=cdrom"
-    if params.get("start"):
+    virtio_iso = p.get("virtio_iso")
+    if virtio_iso:
+        call["ide3"] = f"{virtio_iso},media=cdrom"
+
+    cpu_type = p.get("cpu_type") or ""
+    cpu_flags = p.get("cpu_flags") or ""
+    if cpu_type or cpu_flags:
+        cpu_val = cpu_type or "kvm64"
+        if cpu_flags:
+            cpu_val += f",flags={cpu_flags}"
+        call["cpu"] = cpu_val
+
+    vcpus = p.get("vcpus")
+    if vcpus is not None:
+        call["vcpus"] = int(vcpus)
+    cpulimit = p.get("cpulimit")
+    if cpulimit is not None:
+        call["cpulimit"] = cpulimit
+    cpuunits = p.get("cpuunits")
+    if cpuunits is not None:
+        call["cpuunits"] = int(cpuunits)
+    if p.get("numa"):
+        call["numa"] = 1
+
+    ballooning = p.get("ballooning", True)
+    balloon_mb = p.get("balloon_mb")
+    if not ballooning:
+        call["balloon"] = 0
+    elif balloon_mb is not None:
+        call["balloon"] = int(balloon_mb)
+        shares = p.get("shares")
+        if shares is not None:
+            call["shares"] = int(shares)
+
+    if p.get("net", True):
+        call["net0"] = _net0(p)
+
+    pool = p.get("pool")
+    if pool:
+        call["pool"] = pool
+    tags = p.get("tags")
+    if tags:
+        call["tags"] = tags
+    if p.get("onboot"):
+        call["onboot"] = 1
+    startup_parts = []
+    order = p.get("startup_order")
+    if order:
+        startup_parts.append(f"order={order}")
+    up = p.get("startup_up")
+    if up:
+        startup_parts.append(f"up={up}")
+    down = p.get("startup_down")
+    if down:
+        startup_parts.append(f"down={down}")
+    if startup_parts:
+        call["startup"] = ",".join(startup_parts)
+
+    if p.get("start"):
         call["start"] = 1
     return call
 
@@ -286,8 +408,9 @@ async def create_vm(ctx: JobContext, params: dict) -> dict:
                                                            host_id)
     node = params.get("node") or host_node
     call = _create_params(params)
+    disk_key = f"{params.get('disk_bus') or 'scsi'}0"
     ctx.log(f"creating VM {call['vmid']} ({call['name']}) on {host_name}/{node}: "
-            f"{call['cores']} cores, {call['memory']} MiB, {call['scsi0']}")
+            f"{call['cores']} cores, {call['memory']} MiB, {call[disk_key]}")
     # ponytail: no retry on a taken vmid. PVE is the authority on uniqueness and
     # rejects a duplicate outright; retrying with the next free id would race a
     # second orchestrator indefinitely and silently create a guest under an id

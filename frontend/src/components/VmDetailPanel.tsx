@@ -5,6 +5,7 @@ import { GuestFirewallLine } from './GuestFirewallLine'
 import { KVGrid } from './KVGrid'
 import { SnapshotPanel } from './SnapshotPanel'
 import { StatusPill } from './StatusPill'
+import { VmCdromPanel } from './VmCdromPanel'
 import { fmtBytes, fmtPct, fmtUptime } from '../lib/format'
 
 // p-4, not the page's p-5: these cards sit inside a table row that already
@@ -137,6 +138,12 @@ export function VmDetailPanel({ vm }: { vm: VmRow }) {
               ? <span>Not installed <InfoHint text={NO_AGENT} /></span>
               : 'unknown'],
         ]} />
+      </div>
+      {/* Same reasoning as Snapshots below: what is mounted, and whether
+          Mount is even worth clicking, is worth seeing without opening
+          anything. */}
+      <div className={`${card} mt-4`}>
+        <VmCdromPanel vm={vm} />
       </div>
       {/* Full width and always open, not behind a dialog or a menu. Snapshots
           are the reason most people open a VM row at all, and a panel that is

@@ -227,6 +227,60 @@ def test_create_requires_admin(tmp_path, csrf_header, bootstrap_admin):
         assert r.status_code == 403 and r.json()["detail"] == "Your role does not allow this."
 
 
+
+def test_create_rejects_vcpus_over_sockets_times_cores(tmp_path, csrf_header,
+                                                        bootstrap_admin):
+    app, c, _f, ids = _authed(tmp_path, bootstrap_admin)
+    with c:
+        r = c.post("/api/v1/vms", json=_spec(ids, sockets=1, cores=2, vcpus=5),
+                   headers=csrf_header(c))
+        assert r.status_code == 422, r.text
+
+
+def test_create_rejects_balloon_mb_over_memory_mb(tmp_path, csrf_header,
+                                                   bootstrap_admin):
+    app, c, _f, ids = _authed(tmp_path, bootstrap_admin)
+    with c:
+        r = c.post("/api/v1/vms", json=_spec(ids, memory_mb=2048, balloon_mb=4096),
+                   headers=csrf_header(c))
+        assert r.status_code == 422, r.text
+
+
+def test_create_rejects_efi_disk_without_efi_storage(tmp_path, csrf_header,
+                                                      bootstrap_admin):
+    app, c, _f, ids = _authed(tmp_path, bootstrap_admin)
+    with c:
+        r = c.post("/api/v1/vms", json=_spec(ids, efi_disk=True),
+                   headers=csrf_header(c))
+        assert r.status_code == 422, r.text
+
+
+def test_create_rejects_tpm_without_tpm_storage(tmp_path, csrf_header,
+                                                bootstrap_admin):
+    app, c, _f, ids = _authed(tmp_path, bootstrap_admin)
+    with c:
+        r = c.post("/api/v1/vms", json=_spec(ids, tpm=True), headers=csrf_header(c))
+        assert r.status_code == 422, r.text
+
+
+def test_create_rejects_a_storage_property_string_injection(tmp_path, csrf_header,
+                                                             bootstrap_admin):
+    app, c, _f, ids = _authed(tmp_path, bootstrap_admin)
+    with c:
+        r = c.post("/api/v1/vms", json=_spec(ids, storage="a,backup=0"),
+                   headers=csrf_header(c))
+        assert r.status_code == 422, r.text
+
+
+def test_create_rejects_a_cpu_flags_comma_injection(tmp_path, csrf_header,
+                                                     bootstrap_admin):
+    app, c, _f, ids = _authed(tmp_path, bootstrap_admin)
+    with c:
+        r = c.post("/api/v1/vms", json=_spec(ids, cpu_flags="+aes,evil=1"),
+                   headers=csrf_header(c))
+        assert r.status_code == 422, r.text
+
+
 # --- job handlers ----------------------------------------------------------
 
 def _run_job(tmp_path, kind, params_from_ids, tweak=None):
@@ -272,7 +326,7 @@ def test_create_job_builds_the_qemu_params_and_publishes(tmp_path):
     assert kwargs["scsi0"] == "local-lvm:32"
     assert kwargs["ide2"] == "local:iso/debian-12.iso,media=cdrom"
     assert kwargs["net0"] == "virtio,bridge=vmbr0"
-    assert kwargs["boot"] == "order=scsi0;ide2" and kwargs["start"] == 1
+    assert kwargs["boot"] == "order=ide2;scsi0" and kwargs["start"] == 1
     assert result["vmid"] == 999 and result["exitstatus"] == "OK"
     assert ("resource", {"type": "vm", "id": None, "change": "created"}) in events
 
@@ -320,6 +374,103 @@ def test_create_route_accepts_and_forwards_vlan_tag(tmp_path, csrf_header,
         with app.state.sessionmaker() as db:
             job = db.query(Job).filter_by(kind="vm.create").one()
             assert job.params["vlan_tag"] == 42
+
+
+def test_create_job_builds_a_full_windows11_spec(tmp_path):
+    fake, status, _r, error, _e = _run_job(
+        tmp_path, "vm.create",
+        lambda ids: {"host_id": ids["host_id"], "node": "pve1", "vmid": 999,
+                     "name": "win11", "iso": "local:iso/Win11.iso",
+                     "virtio_iso": "local:iso/virtio-win.iso", "ostype": "win11",
+                     "machine": "q35", "bios": "ovmf", "vga": "std",
+                     "scsihw": "virtio-scsi-single",
+                     "efi_disk": True, "efi_storage": "local-lvm",
+                     "efi_pre_enrolled_keys": True,
+                     "tpm": True, "tpm_storage": "local-lvm", "tpm_version": "v2.0",
+                     "agent": True, "agent_type": "virtio", "agent_fstrim": True,
+                     "disk_bus": "scsi", "disk_gb": 64, "storage": "local-lvm",
+                     "sockets": 2, "cores": 4, "cpu_type": "host",
+                     "memory_mb": 8192, "bridge": "vmbr0"})
+    assert status == "succeeded", error
+    _k, _n, kwargs = fake.creates[0]
+    assert kwargs == {
+        "vmid": 999, "name": "win11", "cores": 4, "sockets": 2, "memory": 8192,
+        "ostype": "win11", "scsihw": "virtio-scsi-single", "scsi0": "local-lvm:64",
+        "boot": "order=ide2;scsi0", "machine": "q35", "bios": "ovmf", "vga": "std",
+        "efidisk0": "local-lvm:1,efitype=4m,pre-enrolled-keys=1",
+        "tpmstate0": "local-lvm:1,version=v2.0",
+        "agent": "enabled=1,type=virtio,fstrim_cloned_disks=1",
+        "ide2": "local:iso/Win11.iso,media=cdrom",
+        "ide3": "local:iso/virtio-win.iso,media=cdrom",
+        "cpu": "host",
+        "net0": "virtio,bridge=vmbr0",
+    }
+
+
+def test_create_job_omits_default_machine_and_bios(tmp_path):
+    fake, status, _r, error, _e = _run_job(
+        tmp_path, "vm.create",
+        lambda ids: {"host_id": ids["host_id"], "node": "pve1", "vmid": 999,
+                     "name": "web-01", "cores": 1, "memory_mb": 512,
+                     "disk_gb": 8, "storage": "local-lvm",
+                     "machine": "i440fx", "bios": "seabios"})
+    assert status == "succeeded", error
+    _k, _n, kwargs = fake.creates[0]
+    assert "machine" not in kwargs and "bios" not in kwargs
+
+
+def test_create_job_disk_bus_changes_disk_key_and_boot_order(tmp_path):
+    for i, bus in enumerate(("virtio", "sata", "ide")):
+        sub = tmp_path / f"bus{i}"
+        sub.mkdir()
+        fake, status, _r, error, _e = _run_job(
+            sub, "vm.create",
+            lambda ids, bus=bus: {"host_id": ids["host_id"], "node": "pve1",
+                                  "vmid": 999, "name": "web-01", "cores": 1,
+                                  "memory_mb": 512, "disk_gb": 8,
+                                  "storage": "local-lvm", "disk_bus": bus,
+                                  "iso": "local:iso/debian-12.iso"})
+        assert status == "succeeded", error
+        _k, _n, kwargs = fake.creates[0]
+        key = f"{bus}0"
+        assert kwargs[key] == "local-lvm:8"
+        assert kwargs["boot"] == f"order=ide2;{key}"
+        assert "scsi0" not in kwargs
+
+
+def test_create_job_net_false_omits_net0(tmp_path):
+    fake, status, _r, error, _e = _run_job(
+        tmp_path, "vm.create",
+        lambda ids: {"host_id": ids["host_id"], "node": "pve1", "vmid": 999,
+                     "name": "web-01", "cores": 1, "memory_mb": 512,
+                     "disk_gb": 8, "storage": "local-lvm", "net": False})
+    assert status == "succeeded", error
+    _k, _n, kwargs = fake.creates[0]
+    assert "net0" not in kwargs
+
+
+def test_create_job_ballooning_false_sends_balloon_zero(tmp_path):
+    fake, status, _r, error, _e = _run_job(
+        tmp_path, "vm.create",
+        lambda ids: {"host_id": ids["host_id"], "node": "pve1", "vmid": 999,
+                     "name": "web-01", "cores": 1, "memory_mb": 512,
+                     "disk_gb": 8, "storage": "local-lvm", "ballooning": False})
+    assert status == "succeeded", error
+    _k, _n, kwargs = fake.creates[0]
+    assert kwargs["balloon"] == 0
+    assert "shares" not in kwargs
+
+
+def test_create_job_balloon_mb_and_shares(tmp_path):
+    fake, status, _r, error, _e = _run_job(
+        tmp_path, "vm.create",
+        lambda ids: {"host_id": ids["host_id"], "node": "pve1", "vmid": 999,
+                     "name": "web-01", "cores": 1, "memory_mb": 4096,
+                     "disk_gb": 8, "storage": "local-lvm",
+                     "ballooning": True, "balloon_mb": 1024, "shares": 500})
+    assert status == "succeeded", error
+    _k, _n, kwargs = fake.creates[0]
+    assert kwargs["balloon"] == 1024 and kwargs["shares"] == 500
 
 
 def test_create_without_an_iso_boots_from_disk_only(tmp_path):

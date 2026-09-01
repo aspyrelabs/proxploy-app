@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 import re
+from typing import Literal
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from proxploy.api import firewall as fwapi
 from proxploy.api.apps import LifecycleIn, enqueue_lifecycle
@@ -576,6 +577,132 @@ def vm_options_update(request: Request, vm_id: int,
             "pending": pending, "detail": detail}
 
 
+# VM CD-ROM: mount and eject only, on the ide slot VM create attaches an
+# install ISO to (services/guestjobs.py::_create_params sets ide2). Removing
+# the drive entirely is a different PVE operation (delete=ide2) and is out of
+# scope here: this only ever sets an ide key to a volid or to "none", both
+# with media=cdrom, which keeps the drive attached but empty.
+CDROM_SLOTS = ("ide2", "ide0", "ide1", "ide3")
+
+
+def _cdrom_media(value) -> bool:
+    return bool(value) and any(p.strip() == "media=cdrom"
+                               for p in str(value).split(","))
+
+
+def _current_cdrom(cfg: dict) -> tuple[str | None, str | None]:
+    """Which ide slot already holds Proxploy's CD-ROM drive, preferring ide2.
+
+    (None, None) if no ide slot on this guest is a CD-ROM drive at all. volid
+    is None when the drive is attached but empty, i.e. already ejected.
+    """
+    for key in CDROM_SLOTS:
+        value = cfg.get(key)
+        if _cdrom_media(value):
+            volid = str(value).split(",", 1)[0]
+            return key, (None if volid == "none" else volid)
+    return None, None
+
+
+def _cdrom_write_slot(cfg: dict) -> str:
+    """Which ide key a mount or eject should write to.
+
+    Reuses the guest's existing CD-ROM slot if it has one. Otherwise ide2, to
+    match what VM create attaches; if that already holds a disk, the next ide
+    slot PVE has not put a disk on. Never a slot whose value is something
+    other than a CD-ROM drive, so a data disk on the ide bus is never
+    overwritten.
+    """
+    key, _ = _current_cdrom(cfg)
+    if key:
+        return key
+    for key in CDROM_SLOTS:
+        if cfg.get(key) is None:
+            return key
+    raise HTTPException(422, {
+        "error": "no_free_ide_slot",
+        "detail": "Every ide slot on this VM already holds a disk, so there "
+                  "is nowhere to attach a CD-ROM drive.",
+    })
+
+
+class CdromIn(BaseModel):
+    volid: str | None = None
+
+
+@router.get("/{vm_id}/cdrom",
+            dependencies=[Depends(_read),
+                          Depends(require_entitlement("vms.options"))])
+def vm_cdrom(request: Request, vm_id: int, db=Depends(get_db),
+            user: User = Depends(_read)):
+    v, host = _vm_and_host(db, vm_id)
+    node = guest_node(host, v)
+    try:
+        reader = client_for_host(request.app, db, host, capability="monitoring")
+        cfg = reader.guest_config("qemu", node, v.vmid)
+    except ProxmoxError as e:
+        raise HTTPException(502, {"error": "pve_error", "detail": str(e)}) from e
+    key, volid = _current_cdrom(cfg)
+    return {"key": key, "volid": volid, "mounted": volid is not None}
+
+
+@router.put("/{vm_id}/cdrom",
+            dependencies=[Depends(_configure),
+                          Depends(require_entitlement("vms.options"))])
+def vm_cdrom_update(request: Request, vm_id: int,
+                    body: CdromIn = Body(default=CdromIn()), db=Depends(get_db),
+                    user: User = Depends(_configure)):
+    """Mount sets `<volid>,media=cdrom`. Eject (a null or "none" volid) sets
+    `none,media=cdrom`, which leaves the drive attached but empty.
+
+    The volid is never forwarded as the caller sent it: it has to be one this
+    host's own ISO listing for the guest's node reports, checked against a
+    fresh read here, not trusted because the caller named it.
+    """
+    v, host = _vm_and_host(db, vm_id)
+    ip = request.client.host if request.client else None
+    node = guest_node(host, v)
+    try:
+        writer = client_for_host(request.app, db, host, capability="lifecycle")
+        reader = client_for_host(request.app, db, host, capability="monitoring")
+        cfg = reader.guest_config("qemu", node, v.vmid)
+    except ProxmoxError as e:
+        raise HTTPException(502, {"error": "pve_error", "detail": str(e)}) from e
+
+    volid = (body.volid or "").strip() or None
+    if volid == "none":
+        volid = None
+    if volid is not None:
+        storage = volid.split(":", 1)[0] if ":" in volid else ""
+        if not storage or not re.match(_NAME_LIKE, storage):
+            raise HTTPException(422, f"{volid!r} is not a volume id this host offers")
+        try:
+            offered = {r.get("volid") for r in
+                      reader.storage_content(node, storage, content="iso")}
+        except ProxmoxError as e:
+            raise HTTPException(422, f"{storage} does not offer ISOs to "
+                                     f"this host") from e
+        if volid not in offered:
+            raise HTTPException(422, f"{volid} is not an ISO this host offers")
+
+    key = _cdrom_write_slot(cfg)
+    value = f"{volid},media=cdrom" if volid else "none,media=cdrom"
+
+    try:
+        writer.guest_config_update("qemu", node, v.vmid, {key: value})
+    except ProxmoxError as e:
+        write_audit(db, actor_type="user", actor_id=user.id, action="vm.cdrom",
+                    target_type="vm", target_id=v.id,
+                    params={"ide_key": key, "volid": volid}, result="error", ip=ip)
+        raise HTTPException(502, {"error": "pve_error", "detail": str(e)}) from e
+    write_audit(db, actor_type="user", actor_id=user.id, action="vm.cdrom",
+                target_type="vm", target_id=v.id,
+                params={"ide_key": key, "volid": volid}, ip=ip)
+    request.app.state.bus.publish("resource", {"type": "vm", "id": v.id,
+                                               "change": "reconfigured"})
+    return {"key": key, "volid": volid, "mounted": volid is not None}
+
+
 # PVE's own name rule for a guest: a DNS-ish label, since it becomes the
 # hostname the guest advertises.
 VM_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.-]{0,62}$")
@@ -605,24 +732,88 @@ def _pick_node(request: Request, host: Host, node: str | None) -> str:
     return known[0]
 
 
+_NAME_LIKE = r"^[A-Za-z0-9][A-Za-z0-9._-]*$"
+_NAME_LIKE_OR_EMPTY = r"^$|^[A-Za-z0-9][A-Za-z0-9._-]*$"
+_DIGITS_OR_EMPTY = r"^\d*$"
+
+
 class VmCreateIn(BaseModel):
     host_id: int
-    name: str
     node: str | None = None
+    name: str
     vmid: int | None = None
-    cores: int = 2
-    memory_mb: int = 2048
-    disk_gb: int = 32
-    storage: str = "local-lvm"
+    pool: str = Field("", pattern=_NAME_LIKE_OR_EMPTY)
+    tags: str = Field("", pattern=r"^[A-Za-z0-9_.;:+-]*$")
+    onboot: bool = False
+    startup_order: str = Field("", pattern=_DIGITS_OR_EMPTY)
+    startup_up: str = Field("", pattern=_DIGITS_OR_EMPTY)
+    startup_down: str = Field("", pattern=_DIGITS_OR_EMPTY)
+    start: bool = False
+
     iso: str | None = None
+    virtio_iso: str = ""
+    ostype: str = "l26"
+
+    machine: Literal["i440fx", "q35"] = "i440fx"
+    bios: Literal["seabios", "ovmf"] = "seabios"
+    vga: Literal["", "std", "qxl", "vmware", "virtio", "serial0", "none"] = ""
+    scsihw: Literal["virtio-scsi-single", "virtio-scsi-pci", "lsi",
+                    "lsi53c810", "megasas", "pvscsi"] = "virtio-scsi-single"
+    efi_disk: bool = False
+    efi_storage: str = Field("", pattern=_NAME_LIKE_OR_EMPTY)
+    efi_pre_enrolled_keys: bool = True
+    tpm: bool = False
+    tpm_storage: str = Field("", pattern=_NAME_LIKE_OR_EMPTY)
+    tpm_version: Literal["v2.0", "v1.2"] = "v2.0"
+    agent: bool = False
+    agent_type: Literal["virtio", "isa"] = "virtio"
+    agent_fstrim: bool = False
+
+    disk_bus: Literal["scsi", "virtio", "sata", "ide"] = "scsi"
+    disk_gb: int = Field(32, ge=1)
+    storage: str = Field("local-lvm", pattern=_NAME_LIKE)
+    disk_cache: Literal["", "none", "writethrough", "writeback", "unsafe",
+                        "directsync"] = ""
+    disk_aio: Literal["", "native", "threads", "io_uring"] = ""
+    disk_discard: bool = False
+    disk_iothread: bool = False
+    disk_ssd: bool = False
+    disk_backup: bool = True
+    disk_replicate: bool = True
+    disk_mbps_rd: float | None = None
+    disk_mbps_wr: float | None = None
+    disk_iops_rd: int | None = None
+    disk_iops_wr: int | None = None
+
+    sockets: int = Field(1, ge=1, le=4)
+    cores: int = Field(2, ge=1, le=128)
+    cpu_type: str = Field("", pattern=r"^[A-Za-z0-9._-]*$")
+    cpu_flags: str = Field("", pattern=r"^[-+A-Za-z0-9_.;]*$")
+    vcpus: int | None = None
+    cpulimit: float | None = Field(None, ge=0, le=128)
+    cpuunits: int | None = Field(None, ge=1, le=262144)
+    numa: bool = False
+
+    memory_mb: int = Field(2048, ge=16)
+    ballooning: bool = True
+    balloon_mb: int | None = None
+    shares: int | None = Field(None, ge=0, le=50000)
+
+    net: bool = True
     bridge: str = "vmbr0"
     # The wizard has a VLAN field on its Network step. Pydantic ignores unknown
     # keys rather than rejecting them, so omitting this here would silently drop
     # the operator's tag and build an untagged NIC: a wrong result that looks
     # like a success. Declared, validated, and threaded through to net0 below.
-    vlan_tag: int | None = None
-    ostype: str = "l26"
-    start: bool = False
+    vlan_tag: int | None = Field(None, ge=1, le=4094)
+    net_model: Literal["virtio", "e1000", "rtl8139", "vmxnet3"] = "virtio"
+    net_macaddr: str = Field(
+        "", pattern=r"^$|^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$")
+    net_mtu: int | None = Field(None, ge=576, le=65520)
+    net_queues: int | None = Field(None, ge=1, le=64)
+    net_rate: float | None = None
+    net_firewall: bool = False
+    net_link_down: bool = False
 
 
 @router.post("", status_code=202,
@@ -644,6 +835,19 @@ def create_vm_route(request: Request, body: VmCreateIn, db=Depends(get_db),
                          ("disk_gb", body.disk_gb)):
         if value <= 0:
             raise HTTPException(422, f"{field} must be greater than zero")
+    if body.vcpus is not None and body.vcpus > body.sockets * body.cores:
+        raise HTTPException(422, f"vcpus ({body.vcpus}) cannot be more than "
+                                 f"sockets times cores ({body.sockets} x "
+                                 f"{body.cores} = {body.sockets * body.cores})")
+    if body.balloon_mb is not None and body.balloon_mb > body.memory_mb:
+        raise HTTPException(422, f"balloon_mb ({body.balloon_mb}) cannot be "
+                                 f"more than memory_mb ({body.memory_mb})")
+    if body.efi_disk and not body.efi_storage:
+        raise HTTPException(422, "efi_disk needs efi_storage to say where "
+                                 "the EFI disk should live")
+    if body.tpm and not body.tpm_storage:
+        raise HTTPException(422, "tpm needs tpm_storage to say where the "
+                                 "TPM state should live")
     node = _pick_node(request, host, body.node)
     vmid = body.vmid
     if vmid is None:
@@ -656,11 +860,8 @@ def create_vm_route(request: Request, body: VmCreateIn, db=Depends(get_db),
             vmid = int(client.cluster_nextid())
         except ProxmoxError as e:
             raise HTTPException(502, str(e)) from e
-    params = {"host_id": host.id, "node": node, "vmid": int(vmid),
-              "name": body.name, "cores": body.cores, "memory_mb": body.memory_mb,
-              "disk_gb": body.disk_gb, "storage": body.storage, "iso": body.iso,
-              "bridge": body.bridge, "vlan_tag": body.vlan_tag,
-              "ostype": body.ostype, "start": body.start}
+    params = {**body.model_dump(), "host_id": host.id, "node": node,
+              "vmid": int(vmid)}
     # Same hole app.install had: the Vm row is created by the job, so with no
     # name passed the row is labelled with the HOST and the history reads "VM
     # Create / pve1". The requested name and the minted vmid are both known
