@@ -1,4 +1,13 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2031
+# VERSION is set by resolve_version(), a plain function call, from a
+# `VERSION=$(manifest_field ...)` assignment. An assignment FROM a command
+# substitution is not a modification INSIDE a subshell, and shellcheck agrees
+# on some builds and not others: CI's Ubuntu 0.9.0 reports twelve SC2031 reads
+# with no SC2030 modification site to point at, while the same 0.9.0 here
+# reports none. A finding with no cause named is not one to chase; if VERSION
+# ever really is set in a subshell, the SC2030 that names the line is what
+# should bring this line back.
 # Proxploy installer (Phase 9a).
 #
 # The one-liner is `curl -fsSL <install URL> | bash`, where the host comes from

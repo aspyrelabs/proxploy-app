@@ -177,7 +177,15 @@ test('a stranger onboards, installs an app, creates a VM and schedules a backup'
     await dialog.getByLabel('ISO image').selectOption(ISO_VOLID)
     await dialog.getByRole('button', { name: 'Next' }).click()
 
+    // System, and CPU & Memory below, are stepped straight past: the wizard's
+    // seven steps (STEPS in VmCreateWizard.tsx) default to a VM that boots,
+    // and what this journey is for is the path all the way through to a
+    // created guest, not each knob on the way. A step whose defaults stop
+    // being enough will fail on the field the next line reaches for.
+    await dialog.getByRole('button', { name: 'Next' }).click()
+
     await dialog.getByLabel('Target storage').selectOption({ label: 'local-lvm' })
+    await dialog.getByRole('button', { name: 'Next' }).click()
     await dialog.getByRole('button', { name: 'Next' }).click()
 
     await dialog.getByLabel('Bridge').selectOption({ label: 'vmbr0' })
