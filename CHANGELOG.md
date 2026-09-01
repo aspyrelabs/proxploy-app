@@ -1,5 +1,54 @@
 # Changelog
 
+## 1.2.1 (2026-09-01)
+
+5 commits since the 1.2.0 release build.
+
+### Read this before upgrading
+
+The update button does not work on 1.2.0 or anything older, and it cannot be
+what brings this release in. Taking 1.2.1 needs one command on the box:
+
+    curl -fsSL https://proxploy.com/install.sh | bash
+
+That installs the missing piece. Every update after it runs from the app.
+
+### Updates
+
+- Self-update works. Pressing update on 1.2.0 swapped a progress bar in and
+  then sat there forever, because the app runs as an unprivileged user that
+  is not allowed to start the update, and the refusal was thrown away instead
+  of shown. The app now writes the version it wants to a request file and a
+  root owned watcher does the update.
+- The watcher decides for itself which release channel a version comes from,
+  reading it off the version already installed. The app asks for a version
+  and nothing else, so a compromised app process cannot point a root process
+  at a server of its own choosing.
+- An update that cannot start says so straight away rather than appearing to
+  begin.
+- The update writes a log and a status file that outlive the restart, so the
+  Updates card shows what the update is doing while it does it, and what went
+  wrong afterwards if something did. Before this the app came back up with no
+  idea an update had ever run.
+
+### Install
+
+- The installer no longer refuses a machine for not having python3 already,
+  nine lines before it installs python3 itself. A minimal Debian 12, which is
+  what a fresh container or a stripped template is, could not get past it.
+- The check that confirms the app is serving waits for it instead of asking
+  once. systemd calls a service active the moment it forks, so a slower box
+  could finish a perfectly good install and be told nothing was serving.
+
+### Packaging and development
+
+- shellcheck can read install.sh again. One valid but unparseable line had
+  been costing the whole file its static checking, and the checks that would
+  have caught the two installer bugs above had been skipping rather than
+  passing.
+- The end to end journey follows the VM wizard through all seven of its
+  steps, having still been clicking through the five it used to have.
+
 ## 1.2.0 (2026-09-01)
 
 5 commits since the 1.1.0 release build.
