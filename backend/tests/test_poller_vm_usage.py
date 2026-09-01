@@ -115,6 +115,52 @@ def test_a_stopped_vm_reports_no_usage_rather_than_zero_usage(tmp_path):
     assert v.disk_total_bytes == 68719476736
 
 
+def test_a_stopped_vm_reports_no_cpu_reading(tmp_path):
+    db, host, now = _seed(tmp_path)
+
+    res = _cycle(db, host, now, status="stopped")
+
+    assert res.snapshot.guests[("qemu", 100)]["cpu_pct"] is None
+
+
+def test_a_stopped_vms_unmoving_network_counters_still_give_no_rate(tmp_path):
+    db, host, now = _seed(tmp_path)
+
+    _cycle(db, host, now, netin=1_000_000, netout=200_000)
+    _cycle(db, host, now + timedelta(seconds=30), status="stopped",
+           netin=1_000_000, netout=200_000)
+
+    v = _vm(db, host)
+    assert v.net_in_bps_cached is None
+    assert v.net_out_bps_cached is None
+
+
+def test_a_stopped_vm_appends_no_metric_samples(tmp_path):
+    from proxploy.models import MetricSample
+
+    db, host, now = _seed(tmp_path)
+    _cycle(db, host, now)
+    v = _vm(db, host)
+    running_count = db.query(MetricSample).filter_by(
+        target_type="vm", target_id=v.id).count()
+    assert running_count == 3
+
+    _cycle(db, host, now + timedelta(seconds=30), status="stopped")
+    assert db.query(MetricSample).filter_by(
+        target_type="vm", target_id=v.id).count() == running_count
+
+
+def test_a_running_vm_records_cpu_mem_and_network_normally(tmp_path):
+    db, host, now = _seed(tmp_path)
+
+    res = _cycle(db, host, now, netin=1_000_000, netout=200_000)
+
+    assert res.snapshot.guests[("qemu", 100)]["cpu_pct"] == 31.0
+    v = _vm(db, host)
+    assert v.mem_bytes == 6442450944
+    assert v.cpu_cores == 4
+
+
 def test_first_cycle_stores_the_counters_but_cannot_make_a_rate(tmp_path):
     """netin/netout are counters, not rates. One reading is one point, and a
     point has no slope. Shared with the app path: same _update_net_rates."""

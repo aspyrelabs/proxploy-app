@@ -7,12 +7,15 @@ import { api, ApiError, apiErrorDetail } from '../api/client'
 import { useEntitlements, useMe, type VmRow } from '../api/hooks'
 import type { JobRow } from '../api/jobs'
 import { useLifecycle } from '../api/jobs'
+import { useSnapshotAction } from '../api/snapshots'
 import { openConsoleWindow } from '../lib/console-window'
 import { notify } from '../lib/notify'
 import { BackupGuestDialog } from './BackupGuestDialog'
 import { CloneDialog } from './CloneDialog'
 import { ConfirmSelfDialog } from './ConfirmSelfDialog'
 import { JobLog } from './JobLog'
+import { TakeSnapshotDialog } from './TakeSnapshotDialog'
+import { VmCdromDialog } from './VmCdromDialog'
 import { VmOptionsDialog } from './VmOptionsDialog'
 import { Button } from './ui/button'
 import { Dialog } from './ui/dialog'
@@ -46,7 +49,7 @@ const STOPPED_ACTIONS = [
 ] as const
 
 type Guard = { phrase: string; detail: string; action: string }
-type Panel = 'clone' | 'backup' | 'destroy' | 'options' | null
+type Panel = 'clone' | 'backup' | 'destroy' | 'options' | 'cdrom' | 'snapshot' | null
 
 /**
  * One VM's actions as a menu, the three-dots half of VmActionBar.
@@ -98,6 +101,7 @@ export function VmActionsMenu({ vm, lifecycle = true, children }: {
   const planDenied = (flag: FeatureKey) => ent.data != null && !ent.has(flag)
   const cloneDenied = planDenied('vms.clone')
   const backupDenied = planDenied('backups.run')
+  const snapshotDenied = planDenied('vms.snapshots')
   // Destroying a VM is gated on the same flag that creates one: the plan that
   // may not make VMs may not unmake them either.
   const destroyDenied = planDenied('vms.create')
@@ -189,6 +193,15 @@ export function VmActionsMenu({ vm, lifecycle = true, children }: {
               <Icon name="tune" size={16} /> Options
             </DropdownMenu.Item>
             <DropdownMenu.Item className={itemCls}
+              onSelect={() => setPanel('cdrom')}>
+              <Icon name="album" size={16} /> Mount ISO
+            </DropdownMenu.Item>
+            <DropdownMenu.Item className={itemCls}
+              disabled={snapshotDenied} title={snapshotDenied ? NOT_IN_PLAN : undefined}
+              onSelect={() => setPanel('snapshot')}>
+              <Icon name="photo_camera" size={16} /> Take snapshot
+            </DropdownMenu.Item>
+            <DropdownMenu.Item className={itemCls}
               disabled={cloneDenied} title={cloneDenied ? NOT_IN_PLAN : undefined}
               onSelect={() => setPanel('clone')}>
               <Icon name="content_copy" size={16} /> Clone
@@ -219,6 +232,8 @@ export function VmActionsMenu({ vm, lifecycle = true, children }: {
         />
       )}
       {panel === 'options' && <VmOptionsDialog vm={vm} onClose={() => setPanel(null)} />}
+      {panel === 'cdrom' && <VmCdromDialog vm={vm} onClose={() => setPanel(null)} />}
+      {panel === 'snapshot' && <TakeSnapshot vm={vm} onClose={() => setPanel(null)} />}
       {panel === 'clone' && <CloneDialog vm={vm} onClose={() => setPanel(null)} />}
       {panel === 'backup' && (
         <BackupGuestDialog
@@ -229,6 +244,32 @@ export function VmActionsMenu({ vm, lifecycle = true, children }: {
       )}
       {panel === 'destroy' && <DestroyVm vm={vm} onClose={() => setPanel(null)} />}
     </>
+  )
+}
+
+/**
+ * Take snapshot's own dialog, opened from the menu. Reuses TakeSnapshotDialog
+ * for the form and useSnapshotAction for the mutation, the same hook
+ * SnapshotPanel uses for rollback and delete.
+ */
+function TakeSnapshot({ vm, onClose }: { vm: VmRow; onClose: () => void }) {
+  const run = useSnapshotAction()
+
+  const submit = (v: { name: string; description: string; vmstate: boolean }) =>
+    run.mutate(
+      { vmId: vm.id, op: 'create', name: v.name, description: v.description, vmstate: v.vmstate },
+      {
+        onSuccess: () => {
+          notify.success('Snapshot create queued')
+          onClose()
+        },
+        onError: () => notify.error(`Could not create snapshot "${v.name}"`),
+      },
+    )
+
+  return (
+    <TakeSnapshotDialog vmName={vm.name} pending={run.isPending}
+      onClose={onClose} onSubmit={submit} />
   )
 }
 

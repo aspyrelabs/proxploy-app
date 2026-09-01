@@ -7,9 +7,10 @@ import { poolsFrom, type StorageRow } from './install/pools'
 import { inputCls } from './LoginForm'
 import { notify } from '../lib/notify'
 import { Button } from './ui/button'
+import { Dialog } from './ui/dialog'
 import { Loading } from './ui/loading'
 
-type CdromStatus = { key: string | null; volid: string | null; mounted: boolean }
+export type CdromStatus = { key: string | null; volid: string | null; mounted: boolean }
 type ContentRow = { volid: string; size: number }
 type HostRow = { id: number; cluster_name?: string | null }
 
@@ -18,31 +19,35 @@ const smallLabel = 'mb-1 block text-[11px] uppercase tracking-wide text-text-3'
 /** The filename half of a volid, e.g. "local:iso/debian-12.7.0-amd64.iso"
  *  becomes "debian-12.7.0-amd64.iso". The store and path prefix are already
  *  said elsewhere; the filename is the part worth reading at a glance. */
-function isoName(volid: string): string {
+export function isoName(volid: string): string {
   const slash = volid.lastIndexOf('/')
   return slash === -1 ? volid : volid.slice(slash + 1)
 }
 
+/** What is mounted in a VM's CD-ROM drive. Shared by this dialog's own
+ *  controls and the read only line VmDetailPanel shows beside the VM's
+ *  other facts. */
+export function useVmCdromStatus(vmId: number) {
+  return useQuery({
+    queryKey: ['vms', vmId, 'cdrom'],
+    queryFn: () => api<CdromStatus>(`/vms/${vmId}/cdrom`),
+  })
+}
+
 /**
- * A VM's CD-ROM drive: what is mounted, plus mount and eject.
- *
- * Always visible in the VM's detail panel rather than behind a dialog, same
- * reasoning as SnapshotPanel: the current state is the thing worth seeing
- * without a click, and mounting an ISO is common enough to want in one place.
+ * A VM's CD-ROM drive: what is mounted, plus mount and eject. Opens from the
+ * VM's three dot menu, since VmDetailPanel is read only.
  *
  * The datastore and ISO pickers follow VmCreateWizard's own iso step: same
  * `/storage/{hostId}/{store}/content?node=...&content=iso` query, same
  * `poolsFrom` filter for which datastores to offer.
  */
-export function VmCdromPanel({ vm }: { vm: VmRow }) {
+export function VmCdromDialog({ vm, onClose }: { vm: VmRow; onClose: () => void }) {
   const qc = useQueryClient()
   const [store, setStore] = useState('')
   const [iso, setIso] = useState('')
 
-  const status = useQuery({
-    queryKey: ['vms', vm.id, 'cdrom'],
-    queryFn: () => api<CdromStatus>(`/vms/${vm.id}/cdrom`),
-  })
+  const status = useVmCdromStatus(vm.id)
   const hosts = useQuery({ queryKey: ['hosts'], queryFn: () => api<HostRow[]>('/hosts') })
   const storages = useQuery({ queryKey: ['storage'], queryFn: () => api<StorageRow[]>('/storage') })
   const isos = useQuery({
@@ -70,24 +75,17 @@ export function VmCdromPanel({ vm }: { vm: VmRow }) {
     },
   })
 
-  if (status.isError) {
-    return (
-      <div>
-        <h3 className="mb-1.5 text-[11px] uppercase tracking-wide text-text-3">CD-ROM</h3>
-        <p className="text-[12.5px] text-red">
+  return (
+    <Dialog title={<>CD-ROM for <span className="font-mono">{vm.name}</span></>}
+            width={460} onClose={onClose}>
+      {status.isError ? (
+        <p className="mt-3 text-[12.5px] text-red">
           Could not read this VM's CD-ROM drive from Proxmox.
         </p>
-      </div>
-    )
-  }
-
-  return (
-    <div>
-      <h3 className="mb-1.5 text-[11px] uppercase tracking-wide text-text-3">CD-ROM</h3>
-      {status.isPending ? (
-        <Loading label="Reading the CD-ROM drive" size={16} />
+      ) : status.isPending ? (
+        <div className="mt-3"><Loading label="Reading the CD-ROM drive" size={16} /></div>
       ) : (
-        <>
+        <div className="mt-3">
           <p className="mb-3 font-mono text-[12.5px] text-text-2">
             {status.data?.mounted && status.data.volid
               ? isoName(status.data.volid)
@@ -126,8 +124,8 @@ export function VmCdromPanel({ vm }: { vm: VmRow }) {
               </Button>
             )}
           </div>
-        </>
+        </div>
       )}
-    </div>
+    </Dialog>
   )
 }

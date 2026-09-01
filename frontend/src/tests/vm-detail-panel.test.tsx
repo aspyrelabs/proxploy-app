@@ -1,17 +1,15 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const requested: string[] = []
 const ISO_VOLID = 'local:iso/debian-12.7.0-amd64-netinst.iso'
 let cdromStatus: { key: string | null; volid: string | null; mounted: boolean } =
   { key: null, volid: null, mounted: false }
-const cdromWrites: (string | null)[] = []
 
 vi.mock('../api/client', () => ({
-  api: vi.fn((path: string, opts?: RequestInit) => {
+  api: vi.fn((path: string) => {
     requested.push(path)
-    const method = (opts?.method ?? 'GET').toUpperCase()
     if (path.startsWith('/metrics/query')) {
       return Promise.resolve({ target: 'vm:4', metric: 'cpu_pct',
                                resolution: '5m', ts: [1, 2], value: [0.2, 0.3] })
@@ -29,26 +27,8 @@ vi.mock('../api/client', () => ({
     if (path.endsWith('/firewall/rules')) {
       return Promise.resolve({ scope: 'guest', digest: null, rules: [] })
     }
-    if (path === '/vms/4/cdrom' && method === 'PUT') {
-      const body = opts?.body ? JSON.parse(String(opts.body)) : {}
-      cdromWrites.push(body.volid ?? null)
-      cdromStatus = body.volid
-        ? { key: 'ide2', volid: body.volid, mounted: true }
-        : { key: 'ide2', volid: null, mounted: false }
-      return Promise.resolve(cdromStatus)
-    }
     if (path === '/vms/4/cdrom') {
       return Promise.resolve(cdromStatus)
-    }
-    if (path === '/hosts') {
-      return Promise.resolve([{ id: 1, cluster_name: null }])
-    }
-    if (path === '/storage') {
-      return Promise.resolve([{ host_id: 1, node: 'pve1', storage: 'local',
-        content: ['iso'], status: 'available', shared: false, cluster_name: null }])
-    }
-    if (path.startsWith('/storage/1/local/content')) {
-      return Promise.resolve([{ volid: ISO_VOLID, size: 700000000 }])
     }
     return Promise.resolve([])
   }),
@@ -91,7 +71,6 @@ const seriesFor = (target: string) => requested
 
 beforeEach(() => {
   requested.length = 0
-  cdromWrites.length = 0
   cdromStatus = { key: null, volid: null, mounted: false }
 })
 
@@ -166,44 +145,26 @@ describe('VmDetailPanel', () => {
   it('shows snapshots inline, so an open row needs no second click', async () => {
     wrap()
     expect(screen.getByRole('heading', { name: 'Snapshots' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Take snapshot' })).toBeInTheDocument()
     await waitFor(() => expect(requested).toContain('/vms/4/snapshots'))
   })
 
-  it('shows the CD-ROM drive inline too, same reasoning as snapshots', async () => {
+  it('has no Take snapshot button: taking one is a menu action now', () => {
     wrap()
-    expect(screen.getByRole('heading', { name: 'CD-ROM' })).toBeInTheDocument()
-    await waitFor(() => expect(screen.getByText('Nothing mounted')).toBeInTheDocument())
-  })
-})
-
-describe('VmCdromPanel', () => {
-  it('says nothing is mounted, and offers no Eject button, until something is', async () => {
-    wrap()
-    await waitFor(() => expect(screen.getByText('Nothing mounted')).toBeInTheDocument())
-    expect(screen.queryByRole('button', { name: 'Eject' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Take snapshot' })).not.toBeInTheDocument()
   })
 
-  it('picks a datastore, picks an ISO, and mounts it', async () => {
+  it('shows which ISO is mounted as plain read only text, no mount controls', async () => {
     wrap()
+    expect(screen.getByText('CD-ROM')).toBeInTheDocument()
     await waitFor(() => expect(screen.getByText('Nothing mounted')).toBeInTheDocument())
-
-    fireEvent.change(screen.getByLabelText('Datastore'), { target: { value: 'local' } })
-    await screen.findByRole('option', { name: ISO_VOLID })
-    fireEvent.change(screen.getByLabelText('ISO image'), { target: { value: ISO_VOLID } })
-
-    fireEvent.click(screen.getByRole('button', { name: 'Mount' }))
-    await waitFor(() => expect(cdromWrites).toEqual([ISO_VOLID]))
-    await waitFor(() =>
-      expect(screen.getByText('debian-12.7.0-amd64-netinst.iso')).toBeInTheDocument())
+    expect(screen.queryByLabelText('Datastore')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Mount' })).not.toBeInTheDocument()
   })
 
-  it('ejects a mounted ISO, leaving the drive attached but empty', async () => {
+  it('shows the mounted ISO by name, read only, when one is mounted', async () => {
     cdromStatus = { key: 'ide2', volid: ISO_VOLID, mounted: true }
     wrap()
-    const eject = await screen.findByRole('button', { name: 'Eject' })
-    fireEvent.click(eject)
-    await waitFor(() => expect(cdromWrites).toEqual([null]))
-    await waitFor(() => expect(screen.getByText('Nothing mounted')).toBeInTheDocument())
+    await waitFor(() =>
+      expect(screen.getByText('debian-12.7.0-amd64-netinst.iso')).toBeInTheDocument())
   })
 })

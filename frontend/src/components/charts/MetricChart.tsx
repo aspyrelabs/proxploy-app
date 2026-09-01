@@ -22,6 +22,7 @@ export type RangeLabel = typeof RANGES[number]['label']
 
 export function MetricChart({
   target, metric, unit, label, accent, defaultRange = '1h', height,
+  idleNote,
 }: {
   target: string | null
   metric: string
@@ -30,6 +31,11 @@ export function MetricChart({
   accent?: ChartAccent
   defaultRange?: RangeLabel
   height?: number
+  /** Set while the subject cannot produce a reading, e.g. a stopped guest.
+   *  The series is not drawn at all: samples recorded before it stopped are
+   *  real, but a line running through a period the guest was not running
+   *  reads as a live measurement of nothing. */
+  idleNote?: string
 }) {
   const [range, setRange] = useState<RangeLabel>(defaultRange)
   const hours = RANGES.find((r) => r.label === range)?.hours ?? 1
@@ -60,7 +66,10 @@ export function MetricChart({
           no target. TimeChart draws "No data yet" when `ts` is empty, which
           is a wrong answer while the first fetch is in flight (and on every
           range change, since each range is a fresh query key). */}
-      {q.isPending && target != null ? (
+      {idleNote ? (
+        <TimeChart ts={[]} values={[]} unit={unit} label={label} accent={accent}
+          height={height} emptyNote={idleNote} />
+      ) : q.isPending && target != null ? (
         <SkeletonGroup label={`Loading ${label}`}>
           {/* TimeChart's own figure line ("47% · peak 61% · axis to 80%"). */}
           <SkeletonLine className="w-40 text-[11px]" />

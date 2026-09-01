@@ -5,7 +5,7 @@ import { GuestFirewallLine } from './GuestFirewallLine'
 import { KVGrid } from './KVGrid'
 import { SnapshotPanel } from './SnapshotPanel'
 import { StatusPill } from './StatusPill'
-import { VmCdromPanel } from './VmCdromPanel'
+import { isoName, useVmCdromStatus } from './VmCdromDialog'
 import { fmtBytes, fmtPct, fmtUptime } from '../lib/format'
 
 // p-4, not the page's p-5: these cards sit inside a table row that already
@@ -25,6 +25,13 @@ const NO_AGENT = 'Storage usage reads unknown for this VM because only the '
 export function VmDetailPanel({ vm }: { vm: VmRow }) {
   const memPct = vm.mem_bytes != null && vm.mem_total_bytes
     ? (vm.mem_bytes / vm.mem_total_bytes) * 100 : null
+  const idleNote = vm.status === 'running' ? undefined
+    : 'No readings while this VM is stopped.'
+  const cdrom = useVmCdromStatus(vm.id)
+  const cdromText = cdrom.isError ? 'unknown'
+    : cdrom.isPending ? 'reading…'
+    : cdrom.data?.mounted && cdrom.data.volid ? isoName(cdrom.data.volid)
+    : 'Nothing mounted'
   return (
     <div>
       {/* @container, not a viewport `lg:`, for the same reason the node
@@ -62,11 +69,11 @@ export function VmDetailPanel({ vm }: { vm: VmRow }) {
         <div className="grid grid-cols-1 gap-4 @3xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
           <div className={card}>
             <MetricChart target={`vm:${vm.id}`} metric="cpu_pct"
-              unit="percent" label="CPU" accent="amber" />
+              unit="percent" label="CPU" accent="amber" idleNote={idleNote} />
           </div>
           <div className={card}>
             <MetricChart target={`vm:${vm.id}`} metric="mem_pct"
-              unit="percent" label="Memory" accent="cyan" />
+              unit="percent" label="Memory" accent="cyan" idleNote={idleNote} />
             {/* The same "x of y" line the Apps panel carries. A VM row used to
                 report only one memory figure, the amount assigned, so there was
                 no pair to write here; it now reports used and assigned under
@@ -137,13 +144,8 @@ export function VmDetailPanel({ vm }: { vm: VmRow }) {
             : vm.guest_agent_ok === false
               ? <span>Not installed <InfoHint text={NO_AGENT} /></span>
               : 'unknown'],
+          ['CD-ROM', cdromText],
         ]} />
-      </div>
-      {/* Same reasoning as Snapshots below: what is mounted, and whether
-          Mount is even worth clicking, is worth seeing without opening
-          anything. */}
-      <div className={`${card} mt-4`}>
-        <VmCdromPanel vm={vm} />
       </div>
       {/* Full width and always open, not behind a dialog or a menu. Snapshots
           are the reason most people open a VM row at all, and a panel that is

@@ -372,8 +372,8 @@ describe('VmIconGrid', () => {
     openMenu(screen.getByTestId('vm-icon-1'))
     const labels = (await screen.findAllByRole('menuitem'))
       .map((i) => i.textContent?.trim())
-    expect(labels).toEqual(['Start', 'Console', 'Firewall', 'Options', 'Clone',
-                            'Backup', 'Delete'])
+    expect(labels).toEqual(['Start', 'Console', 'Firewall', 'Options', 'Mount ISO',
+                            'Take snapshot', 'Clone', 'Backup', 'Delete'])
   })
 
   it('offers Console on the tile, the only way into a VM at all', async () => {
@@ -408,8 +408,8 @@ describe('VmIconGrid', () => {
     openMenu(screen.getByTestId('vm-icon-1'))
     const labels = (await screen.findAllByRole('menuitem'))
       .map((i) => i.textContent?.trim())
-    expect(labels).toEqual(['Resume', 'Console', 'Firewall', 'Options', 'Clone',
-                            'Backup', 'Delete'])
+    expect(labels).toEqual(['Resume', 'Console', 'Firewall', 'Options', 'Mount ISO',
+                            'Take snapshot', 'Clone', 'Backup', 'Delete'])
   })
 
   it('does not offer to shut down a VM that is already stopped', async () => {
@@ -431,7 +431,8 @@ describe('VmIconGrid', () => {
     const labels = (await screen.findAllByRole('menuitem'))
       .map((i) => i.textContent?.trim())
     expect(labels).toEqual(['Stop', 'Restart', 'Shutdown', 'Pause', 'Console',
-                            'Firewall', 'Options', 'Clone', 'Backup', 'Delete'])
+                            'Firewall', 'Options', 'Mount ISO', 'Take snapshot',
+                            'Clone', 'Backup', 'Delete'])
   })
 
   it('says Working rather than guessing an action set while a job is in flight', async () => {

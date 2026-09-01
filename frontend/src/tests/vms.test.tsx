@@ -22,6 +22,11 @@ let features: Record<string, boolean> = {}
 let capabilities: Record<string, boolean> = { lifecycle: true, console: true }
 let deleteOutcome: 'ok' | 'guest_running' | 'self_target' = 'ok'
 const calls: { path: string; method: string; body: any }[] = []
+const ISO_VOLID = 'local:iso/debian-12.7.0-amd64-netinst.iso'
+let cdromStatus: { key: string | null; volid: string | null; mounted: boolean } =
+  { key: null, volid: null, mounted: false }
+const cdromWrites: (string | null)[] = []
+const snapshotCreates: { name: string; description: string; vmstate: boolean }[] = []
 
 vi.mock('../api/client', async (importOriginal) => {
   return {
@@ -33,7 +38,7 @@ vi.mock('../api/client', async (importOriginal) => {
         return Promise.resolve({ tier: 'builtin', grace: null, clock_skew: false, features })
       }
       if (path.startsWith('/hosts')) {
-        return Promise.resolve([{ id: 1, name: 'pve-a', capabilities }])
+        return Promise.resolve([{ id: 1, name: 'pve-a', cluster_name: null, capabilities }])
       }
       if (path.startsWith('/jobs/')) return Promise.resolve([])
       if (method === 'DELETE' && path === '/vms/9') {
@@ -50,6 +55,25 @@ vi.mock('../api/client', async (importOriginal) => {
           }))
         }
         return Promise.resolve({ job: { id: 44, kind: 'vm.delete', status: 'queued' } })
+      }
+      if (path === '/vms/9/cdrom' && method === 'PUT') {
+        cdromWrites.push(body.volid ?? null)
+        cdromStatus = body.volid
+          ? { key: 'ide2', volid: body.volid, mounted: true }
+          : { key: 'ide2', volid: null, mounted: false }
+        return Promise.resolve(cdromStatus)
+      }
+      if (path === '/vms/9/cdrom') return Promise.resolve(cdromStatus)
+      if (path === '/storage') {
+        return Promise.resolve([{ host_id: 1, node: 'pve1', storage: 'local',
+          content: ['iso'], status: 'available', shared: false, cluster_name: null }])
+      }
+      if (path.startsWith('/storage/1/local/content')) {
+        return Promise.resolve([{ volid: ISO_VOLID, size: 700000000 }])
+      }
+      if (path === '/vms/9/snapshots' && method === 'POST') {
+        snapshotCreates.push({ name: body.name, description: body.description, vmstate: body.vmstate })
+        return Promise.resolve({ job: { id: 45, kind: 'vm.snapshot', status: 'queued' } })
       }
       return Promise.resolve(null)
     }),
@@ -78,7 +102,7 @@ const VM: VmRow = {
   mem_bytes: 2147483648, mem_total_bytes: 4294967296,
   disk_bytes: 53687091200, disk_total_bytes: 107374182400,
   net_in_bps: null, net_out_bps: null, uptime_s: 86400,
-  guest_agent_ok: null,
+  guest_agent_ok: null, node: 'pve1',
 }
 
 const ALL_FEATURES = {
@@ -111,9 +135,13 @@ describe('VmActionBar', () => {
     deleteOutcome = 'ok'
     features = { ...ALL_FEATURES }
     capabilities = { lifecycle: true, console: true }
+    cdromStatus = { key: null, volid: null, mounted: false }
+    cdromWrites.length = 0
+    snapshotCreates.length = 0
     navigate.mockClear()
     openConsole.mockClear()
     vi.mocked(notify.error).mockClear()
+    vi.mocked(notify.success).mockClear()
   })
 
   it('offers Stop, Restart and Console beside a menu while the VM is running', () => {
@@ -160,8 +188,8 @@ describe('VmActionBar', () => {
   it('lists the menu actions in order, Delete last and destructive', async () => {
     wrap({ ...VM, status: 'running' })
     openMenu()
-    expect(await items()).toEqual(['Shutdown', 'Pause', 'Firewall', 'Options', 'Clone',
-                                   'Backup', 'Delete'])
+    expect(await items()).toEqual(['Shutdown', 'Pause', 'Firewall', 'Options', 'Mount ISO',
+                                   'Take snapshot', 'Clone', 'Backup', 'Delete'])
     const all = screen.getAllByRole('menuitem')
     const del = all[all.length - 1]
     // The destructive vocabulary is the text-red token, and the border above
@@ -178,7 +206,8 @@ describe('VmActionBar', () => {
     // running guest now branches on status the way Pause always did.
     wrap({ ...VM, status: 'stopped' })
     openMenu()
-    expect(await items()).toEqual(['Firewall', 'Options', 'Clone', 'Backup', 'Delete'])
+    expect(await items()).toEqual(['Firewall', 'Options', 'Mount ISO', 'Take snapshot',
+                                   'Clone', 'Backup', 'Delete'])
   })
 
   it('offers Resume only while the VM is paused, in place of Pause', async () => {
@@ -188,8 +217,8 @@ describe('VmActionBar', () => {
     // suspended guest, so the way out is Resume and then Shutdown.
     wrap({ ...VM, status: 'paused' })
     openMenu()
-    expect(await items()).toEqual(['Resume', 'Firewall', 'Options', 'Clone', 'Backup',
-                                   'Delete'])
+    expect(await items()).toEqual(['Resume', 'Firewall', 'Options', 'Mount ISO',
+                                   'Take snapshot', 'Clone', 'Backup', 'Delete'])
   })
 
   it('does not repeat the row buttons inside the menu', async () => {
@@ -221,6 +250,78 @@ describe('VmActionBar', () => {
     await waitFor(() => expect(clone).toHaveAttribute('data-disabled'))
     expect(screen.getByRole('menuitem', { name: /backup/i })).toHaveAttribute('data-disabled')
     expect(screen.getByRole('menuitem', { name: /delete/i })).toHaveAttribute('data-disabled')
+    expect(screen.getByRole('menuitem', { name: /take snapshot/i })).toHaveAttribute('data-disabled')
+  })
+})
+
+describe('VmActionsMenu mount ISO', () => {
+  beforeEach(() => {
+    features = { ...ALL_FEATURES }
+    capabilities = { lifecycle: true, console: true }
+    cdromStatus = { key: null, volid: null, mounted: false }
+    cdromWrites.length = 0
+  })
+
+  it('opens a dialog, not the row, and shows nothing mounted until something is', async () => {
+    wrap(VM)
+    openMenu()
+    fireEvent.click(await screen.findByRole('menuitem', { name: /mount iso/i }))
+    const dialog = await screen.findByRole('dialog')
+    await waitFor(() => expect(within(dialog).getByText('Nothing mounted')).toBeInTheDocument())
+    expect(within(dialog).queryByRole('button', { name: 'Eject' })).not.toBeInTheDocument()
+  })
+
+  it('picks a datastore, picks an ISO, and mounts it', async () => {
+    wrap(VM)
+    openMenu()
+    fireEvent.click(await screen.findByRole('menuitem', { name: /mount iso/i }))
+    const dialog = await screen.findByRole('dialog')
+    await waitFor(() => expect(within(dialog).getByText('Nothing mounted')).toBeInTheDocument())
+
+    fireEvent.change(within(dialog).getByLabelText('Datastore'), { target: { value: 'local' } })
+    await within(dialog).findByRole('option', { name: ISO_VOLID })
+    fireEvent.change(within(dialog).getByLabelText('ISO image'), { target: { value: ISO_VOLID } })
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Mount' }))
+    await waitFor(() => expect(cdromWrites).toEqual([ISO_VOLID]))
+    await waitFor(() =>
+      expect(within(dialog).getByText('debian-12.7.0-amd64-netinst.iso')).toBeInTheDocument())
+  })
+
+  it('ejects a mounted ISO, leaving the drive attached but empty', async () => {
+    cdromStatus = { key: 'ide2', volid: ISO_VOLID, mounted: true }
+    wrap(VM)
+    openMenu()
+    fireEvent.click(await screen.findByRole('menuitem', { name: /mount iso/i }))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Eject' }))
+    await waitFor(() => expect(cdromWrites).toEqual([null]))
+    await waitFor(() => expect(within(dialog).getByText('Nothing mounted')).toBeInTheDocument())
+  })
+})
+
+describe('VmActionsMenu take snapshot', () => {
+  beforeEach(() => {
+    features = { ...ALL_FEATURES }
+    capabilities = { lifecycle: true, console: true }
+    snapshotCreates.length = 0
+    vi.mocked(notify.success).mockClear()
+  })
+
+  it('takes a snapshot with the name typed into the dialog', async () => {
+    wrap(VM)
+    openMenu()
+    fireEvent.click(await screen.findByRole('menuitem', { name: /take snapshot/i }))
+    const dialog = await screen.findByRole('dialog')
+
+    fireEvent.change(within(dialog).getByLabelText('Snapshot name'),
+      { target: { value: 'pre-upgrade' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: /take snapshot/i }))
+
+    await waitFor(() => expect(snapshotCreates).toEqual(
+      [{ name: 'pre-upgrade', description: '', vmstate: false }]))
+    expect(notify.success).toHaveBeenCalledWith('Snapshot create queued')
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
   })
 })
 

@@ -5,7 +5,6 @@ import { useSnapshotAction, useSnapshots } from '../api/snapshots'
 import type { SnapshotRow } from '../api/snapshots'
 import { ConfirmSelfDialog } from './ConfirmSelfDialog'
 import { EmptyState } from './EmptyState'
-import { TakeSnapshotDialog } from './TakeSnapshotDialog'
 import { Button } from './ui/button'
 import { SkeletonGroup, SkeletonTable } from './ui/skeleton'
 import { fmtBytes } from '../lib/format'
@@ -32,7 +31,6 @@ export function SnapshotPanel({ vmId, vmName }: { vmId: number; vmName: string }
   const { data, isError, isPending } = useSnapshots(vmId)
   const run = useSnapshotAction()
   const [guard, setGuard] = useState<Guard | null>(null)
-  const [taking, setTaking] = useState(false)
 
   // useEntitlements().has() is false until /entitlements resolves, gate on
   // ent.data != null too or every plan sees a dead panel during the first fetch.
@@ -43,16 +41,9 @@ export function SnapshotPanel({ vmId, vmName }: { vmId: number; vmName: string }
   // is not a snapshot and cannot be rolled back to or deleted.
   const rows: SnapshotRow[] = (data ?? []).filter((s) => s.name !== 'current')
 
-  // `create` carries the dialog's fields; rollback and delete carry none.
-  const fire = (
-    op: 'create' | 'rollback' | 'delete',
-    target: string,
-    confirm?: string,
-    create?: { description: string; vmstate: boolean },
-  ) =>
+  const fire = (op: 'rollback' | 'delete', target: string, confirm?: string) =>
     run.mutate(
-      { vmId, op, name: target, confirm,
-        description: create?.description, vmstate: create?.vmstate },
+      { vmId, op, name: target, confirm },
       {
         onError: (e) => {
           const body = e instanceof ApiError ? (e.body as Record<string, unknown>) : null
@@ -68,9 +59,6 @@ export function SnapshotPanel({ vmId, vmName }: { vmId: number; vmName: string }
         },
         onSuccess: () => {
           setGuard(null)
-          // The dialog owns the form fields and unmounts with them, so there
-          // is nothing to clear here.
-          if (op === 'create') setTaking(false)
           notify.success(`Snapshot ${op} queued`)
         },
       },
@@ -91,14 +79,9 @@ export function SnapshotPanel({ vmId, vmName }: { vmId: number; vmName: string }
 
   return (
     <>
-      {/* Take Snapshot lives in a dialog (occasional act), keeping the form out
-          of the reader's way. No card of its own — VmDetailPanel wraps this. */}
+      {/* No card of its own — VmDetailPanel wraps this. */}
       <div className="mb-3 flex items-center justify-between gap-3">
         <h3 className="text-[11px] uppercase tracking-wide text-text-3">Snapshots</h3>
-        <Button size="sm" disabled={denied || run.isPending} title={planTitle}
-          onClick={() => setTaking(true)}>
-          Take snapshot
-        </Button>
       </div>
 
       <div>
@@ -161,16 +144,6 @@ export function SnapshotPanel({ vmId, vmName }: { vmId: number; vmName: string }
           </table>
         )}
       </div>
-
-      {taking && (
-        <TakeSnapshotDialog
-          vmName={vmName}
-          pending={run.isPending}
-          onClose={() => setTaking(false)}
-          onSubmit={(v) => fire('create', v.name, undefined,
-                                { description: v.description, vmstate: v.vmstate })}
-        />
-      )}
 
       {guard && (
         <ConfirmSelfDialog

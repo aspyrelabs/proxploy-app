@@ -650,7 +650,7 @@ def test_host_metrics_are_skipped_rather_than_taken_from_another_node(tmp_path):
     assert got == [], f"recorded another node's cpu as this host's: {got}"
 
 
-def _ingest_at(db, host, now, netin, netout):
+def _ingest_at(db, host, now, netin, netout, status="running"):
     """One cycle with the CT-150 counters and the clock both pinned.
 
     A rate needs two readings and the gap between them, so neither the
@@ -662,6 +662,8 @@ def _ingest_at(db, host, now, netin, netout):
     for r in resources:
         if r.get("type") == "lxc" and r["vmid"] == 150:
             r["netin"], r["netout"] = netin, netout
+            if status != "running":
+                r["status"], r["cpu"], r["mem"], r["uptime"] = status, 0, 0, 0
     return ingest_cycle(db, host, resources, rrd, now)
 
 
@@ -753,3 +755,55 @@ def test_a_counter_reset_yields_no_rate_rather_than_a_spike(tmp_path):
     # after it produces a rate again.
     _ingest_at(db, host, t0 + timedelta(seconds=60), netin=305_000, netout=1_500)
     assert app.net_in_bps_cached == 10_000.0
+
+
+def test_a_stopped_app_reports_no_cpu_or_memory_reading(tmp_path):
+    from datetime import datetime
+    from proxploy.models import MetricSample
+    from tests.support import make_db, seed_host_row
+
+    db = make_db(tmp_path)
+    host = seed_host_row(db)
+    app = _seed_app(db, host)
+
+    _ingest_at(db, host, datetime(2026, 8, 20, 12, 0, 0),
+              netin=0, netout=0, status="stopped")
+
+    assert app.cpu_pct_cached is None
+    assert app.mem_bytes_cached is None
+    assert app.disk_total_bytes_cached == 17179869184
+    assert db.query(MetricSample).filter_by(
+        target_type="app", target_id=app.id).count() == 0
+
+
+def test_a_stopped_apps_unmoving_network_counters_still_give_no_rate(tmp_path):
+    from datetime import datetime, timedelta
+    from tests.support import make_db, seed_host_row
+
+    db = make_db(tmp_path)
+    host = seed_host_row(db)
+    app = _seed_app(db, host)
+
+    t0 = datetime(2026, 8, 20, 12, 0, 0)
+    _ingest_at(db, host, t0, netin=1_000_000, netout=200_000)
+    _ingest_at(db, host, t0 + timedelta(seconds=30), netin=1_000_000,
+              netout=200_000, status="stopped")
+
+    assert app.net_in_bps_cached is None
+    assert app.net_out_bps_cached is None
+
+
+def test_a_running_app_keeps_recording_cpu_mem_and_samples(tmp_path):
+    from proxploy.models import MetricSample
+    from tests.support import make_db, seed_host_row
+
+    db = make_db(tmp_path)
+    host = seed_host_row(db)
+    app = _seed_app(db, host)
+
+    _ingest(db, host)
+
+    assert app.cpu_pct_cached == 12.0
+    assert app.mem_bytes_cached == 2147483648
+    assert db.query(MetricSample).filter_by(
+        target_type="app", target_id=app.id).count() == 3

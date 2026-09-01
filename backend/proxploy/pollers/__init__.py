@@ -99,17 +99,21 @@ def _update_net_rates(row: App | Vm, g: dict, now: datetime) -> None:
     previous reading over the time between the two, and both the reading and
     its timestamp are stored for the next cycle.
 
-    Two cases produce no rate rather than a wrong one: a first reading has
-    nothing to diff against, and a guest restart zeroes the counters, so the
-    delta goes negative and its absolute value would draw a fabricated traffic
-    spike at exactly the moment an operator is watching. Either way the rate is
-    None for one cycle and recovers on the next.
+    Three cases produce no rate rather than a wrong one: a guest that is not
+    running has counters that cannot move, and a real 0.0 bps there would claim
+    a measurement nobody took; a first reading has nothing to diff against; and
+    a guest restart zeroes the counters, so the delta goes negative and its
+    absolute value would draw a fabricated traffic spike at exactly the moment
+    an operator is watching. The last two recover on the next cycle, and a
+    stopped guest recovers when it starts.
     """
     prev_in, prev_out, prev_at = (row.net_in_cached, row.net_out_cached,
                                   row.net_sampled_at)
     now_in, now_out = g["net_in"], g["net_out"]
     elapsed = (now - prev_at).total_seconds() if prev_at else 0.0
-    if prev_in is None or prev_out is None or elapsed <= 0:
+    if g["status"] != "running":
+        row.net_in_bps_cached = row.net_out_bps_cached = None
+    elif prev_in is None or prev_out is None or elapsed <= 0:
         row.net_in_bps_cached = row.net_out_bps_cached = None
     elif now_in < prev_in or now_out < prev_out:
         row.net_in_bps_cached = row.net_out_bps_cached = None
@@ -619,15 +623,21 @@ def ingest_cycle(db, host: Host, resources: list[dict],
     for r in resources:
         if r.get("type") not in ("lxc", "qemu"):
             continue
+        status = r.get("status", "unknown")
+        running = status == "running"
+        mem_bytes = int(r.get("mem") or 0) if running else None
+        mem_total_bytes = int(r.get("maxmem") or 0)
         guests[(r["type"], int(r["vmid"]))] = {
             "name": r.get("name"), "node": r.get("node"),
-            "status": r.get("status", "unknown"),
+            "status": status,
             # PVE reports 1 for a template and omits the key otherwise.
             "template": bool(r.get("template")),
-            "cpu_pct": round(float(r.get("cpu") or 0.0) * 100, 1),
+            "cpu_pct": (round(float(r.get("cpu") or 0.0) * 100, 1)
+                        if running else None),
             "cpu_cores": int(r.get("maxcpu") or 0),
-            "mem_bytes": int(r.get("mem") or 0),
-            "mem_total_bytes": int(r.get("maxmem") or 0),
+            "mem_bytes": mem_bytes,
+            "mem_total_bytes": mem_total_bytes,
+            "mem_pct": _mem_pct(mem_bytes, mem_total_bytes) if running else None,
             "disk_bytes": int(r.get("maxdisk") or 0),
             # `disk` is USED, against `disk_bytes` above which is ALLOCATED.
             "disk_used_bytes": int(r.get("disk") or 0),
@@ -693,14 +703,13 @@ def ingest_cycle(db, host: Host, resources: list[dict],
             # a plain refetch of the apps list, which is exactly right here.
             events.append(("resource", {"type": "app", "id": a.id,
                                         "change": "ip"}))
-        samples.append(MetricSample(target_type="app", target_id=a.id,
-                                    metric="cpu_pct", value=g["cpu_pct"], ts=now))
-        samples.append(MetricSample(target_type="app", target_id=a.id,
-                                    metric="mem_bytes", value=float(g["mem_bytes"]), ts=now))
-        samples.append(MetricSample(target_type="app", target_id=a.id,
-                                    metric="mem_pct",
-                                    value=_mem_pct(g["mem_bytes"],
-                                                   g["mem_total_bytes"]), ts=now))
+        if g["status"] == "running":
+            samples.append(MetricSample(target_type="app", target_id=a.id,
+                                        metric="cpu_pct", value=g["cpu_pct"], ts=now))
+            samples.append(MetricSample(target_type="app", target_id=a.id,
+                                        metric="mem_bytes", value=float(g["mem_bytes"]), ts=now))
+            samples.append(MetricSample(target_type="app", target_id=a.id,
+                                        metric="mem_pct", value=g["mem_pct"], ts=now))
         # ponytail: no disk_pct SAMPLE for apps or VMs. Apps now cache a disk
         # reading (disk_bytes_cached above), but that is a current value on
         # the row, not a series: /cluster/resources' `disk` field is
@@ -709,7 +718,7 @@ def ingest_cycle(db, host: Host, resources: list[dict],
         # validation rejects disk_pct on app/vm targets with an explanatory
         # 422 instead.
         targets.append({"t": "app", "id": a.id, "cpu_pct": g["cpu_pct"],
-                        "mem_pct": _mem_pct(g["mem_bytes"], g["mem_total_bytes"])})
+                        "mem_pct": g["mem_pct"]})
 
     existing = {v.vmid: v for v in db.query(Vm).filter_by(host_id=host.id).all()}
     seen: set[int] = set()
@@ -781,16 +790,15 @@ def ingest_cycle(db, host: Host, resources: list[dict],
         _refresh_vm_disk(v, g, client, fs_checked, now, skip_probe=v.vmid in new_vmids)
         # Asks once per VM ever, not on a timer. See _refresh_os_type.
         _refresh_os_type(v, g, client)
-        samples.append(MetricSample(target_type="vm", target_id=v.id,
-                                    metric="cpu_pct", value=g["cpu_pct"], ts=now))
-        samples.append(MetricSample(target_type="vm", target_id=v.id,
-                                    metric="mem_bytes", value=float(g["mem_bytes"]), ts=now))
-        samples.append(MetricSample(target_type="vm", target_id=v.id,
-                                    metric="mem_pct",
-                                    value=_mem_pct(g["mem_bytes"],
-                                                   g["mem_total_bytes"]), ts=now))
+        if g["status"] == "running":
+            samples.append(MetricSample(target_type="vm", target_id=v.id,
+                                        metric="cpu_pct", value=g["cpu_pct"], ts=now))
+            samples.append(MetricSample(target_type="vm", target_id=v.id,
+                                        metric="mem_bytes", value=float(g["mem_bytes"]), ts=now))
+            samples.append(MetricSample(target_type="vm", target_id=v.id,
+                                        metric="mem_pct", value=g["mem_pct"], ts=now))
         targets.append({"t": "vm", "id": v.id, "cpu_pct": g["cpu_pct"],
-                        "mem_pct": _mem_pct(g["mem_bytes"], g["mem_total_bytes"])})
+                        "mem_pct": g["mem_pct"]})
     if membership_changed:
         events.append(("resource", {"type": "vm", "change": "list"}))
 

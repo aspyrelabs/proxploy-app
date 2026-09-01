@@ -18,6 +18,8 @@ const card = 'rounded-card border border-line-soft bg-panel-2 p-4'
 export function AppDetailPanel({ app }: { app: AppRow }) {
   const memPct = app.mem_bytes != null && app.mem_total_bytes
     ? (app.mem_bytes / app.mem_total_bytes) * 100 : null
+  const idleNote = app.status === 'running' ? undefined
+    : 'No readings while this container is stopped.'
   return (
     <div>
       {/* @container, not a viewport `lg:`: this box is a table cell sharing the
@@ -34,11 +36,11 @@ export function AppDetailPanel({ app }: { app: AppRow }) {
             overflow widened the whole Apps table with it. */}
         <div className="grid grid-cols-1 gap-4 @3xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
           <div className={card}>
-            <MetricChart target={`app:${app.id}`} metric="cpu_pct"
+            <MetricChart idleNote={idleNote} target={`app:${app.id}`} metric="cpu_pct"
               unit="percent" label="CPU" accent="amber" />
           </div>
           <div className={card}>
-            <MetricChart target={`app:${app.id}`} metric="mem_pct"
+            <MetricChart idleNote={idleNote} target={`app:${app.id}`} metric="mem_pct"
               unit="percent" label="Memory" accent="cyan" />
             {/* The chart is a percentage over time; this line is what that
                 percentage is a percentage OF, which the chart cannot say. */}

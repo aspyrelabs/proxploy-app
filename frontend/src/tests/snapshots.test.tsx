@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const calls: { path: string; method: string; body: any }[] = []
@@ -64,25 +64,6 @@ describe('SnapshotPanel', () => {
     expect(screen.getByText('RAM')).toBeInTheDocument()
   })
 
-  it('takes a snapshot with name, description and the with-RAM flag', async () => {
-    wrap(<SnapshotPanel vmId={9} vmName="win11" />)
-    // The form lives in a dialog now, not parked open above the list, so the
-    // fields do not exist until the button opens it.
-    fireEvent.click(await screen.findByRole('button', { name: /take snapshot/i }))
-    fireEvent.change(await screen.findByLabelText(/snapshot name/i), { target: { value: 'clean-install' } })
-    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: 'fresh' } })
-    fireEvent.click(screen.getByLabelText(/include ram/i))
-    // Two buttons carry this name now: the one that opened the dialog and the
-    // dialog's own submit. The submit is the one inside the dialog.
-    fireEvent.click(within(screen.getByRole('dialog'))
-      .getByRole('button', { name: /take snapshot/i }))
-    await waitFor(() => expect(calls.length).toBe(1))
-    expect(calls[0]).toMatchObject({
-      path: '/vms/9/snapshots', method: 'POST',
-      body: { name: 'clean-install', description: 'fresh', vmstate: true },
-    })
-  })
-
   it('escalates a 409 confirm_required on rollback into the typed-confirmation dialog and retries', async () => {
     rollbackGuard = true
     wrap(<SnapshotPanel vmId={9} vmName="win11" />)
@@ -129,13 +110,7 @@ describe('SnapshotPanel', () => {
   it('disables every mutating control with a plan tooltip when vms.snapshots is off', async () => {
     features = { 'vms.snapshots': false }
     wrap(<SnapshotPanel vmId={9} vmName="win11" />)
-    // "Take snapshot" is also disabled by an empty name field on first paint,
-    // so waiting on it alone would pass before the snapshots query (and thus
-    // the row-level Rollback/Delete buttons) ever resolves. Wait on a
-    // data-dependent control first so the assertions below aren't racing it.
     expect(await screen.findByRole('button', { name: /rollback/i })).toBeDisabled()
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: /take snapshot/i })).toBeDisabled())
     expect(screen.getByRole('button', { name: /delete/i })).toBeDisabled()
     expect(screen.getByRole('button', { name: /rollback/i }))
       .toHaveAttribute('title', 'Not included in your plan')
