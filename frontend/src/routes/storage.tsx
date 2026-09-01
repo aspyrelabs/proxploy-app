@@ -61,7 +61,7 @@ function VolumeTable({ volumes, hostId, node, storage }:
       <tbody>
         {volumes.map((v) => (
           <tr key={v.volid} className="border-t border-line-soft hover:bg-panel-2">
-            <td className="py-2.5 font-mono">{v.volid}</td>
+            <td className="py-2.5 font-mono break-all">{v.volid}</td>
             <td className="py-2.5 font-mono text-text-2">{v.format ?? 'unknown'}</td>
             <td className="py-2.5 font-mono text-text-2">{fmtBytes(v.size)}</td>
             <td className="py-2.5 font-mono text-text-2">{v.vmid ?? 'unknown'}</td>

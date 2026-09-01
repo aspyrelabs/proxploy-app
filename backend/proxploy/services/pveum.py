@@ -200,7 +200,7 @@ def repair_commands(plan: dict[str, list[str] | None],
         if not missing:
             continue
         existing = existing_by_role.get(role)
-        if existing is None:
+        if not existing:
             continue
         union = merge_role_privs(existing, missing)
         commands.append(f"pveum role modify {role} -privs '{','.join(union)}'")

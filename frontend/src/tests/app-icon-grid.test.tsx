@@ -372,7 +372,7 @@ describe('VmIconGrid', () => {
     openMenu(screen.getByTestId('vm-icon-1'))
     const labels = (await screen.findAllByRole('menuitem'))
       .map((i) => i.textContent?.trim())
-    expect(labels).toEqual(['Start', 'Console', 'Firewall', 'Options', 'Mount ISO',
+    expect(labels).toEqual(['Start', 'Console', 'Firewall', 'Options', 'Mount/Eject ISO',
                             'Take snapshot', 'Clone', 'Backup', 'Delete'])
   })
 
@@ -408,7 +408,7 @@ describe('VmIconGrid', () => {
     openMenu(screen.getByTestId('vm-icon-1'))
     const labels = (await screen.findAllByRole('menuitem'))
       .map((i) => i.textContent?.trim())
-    expect(labels).toEqual(['Resume', 'Console', 'Firewall', 'Options', 'Mount ISO',
+    expect(labels).toEqual(['Resume', 'Console', 'Firewall', 'Options', 'Mount/Eject ISO',
                             'Take snapshot', 'Clone', 'Backup', 'Delete'])
   })
 
@@ -431,7 +431,7 @@ describe('VmIconGrid', () => {
     const labels = (await screen.findAllByRole('menuitem'))
       .map((i) => i.textContent?.trim())
     expect(labels).toEqual(['Stop', 'Restart', 'Shutdown', 'Pause', 'Console',
-                            'Firewall', 'Options', 'Mount ISO', 'Take snapshot',
+                            'Firewall', 'Options', 'Mount/Eject ISO', 'Take snapshot',
                             'Clone', 'Backup', 'Delete'])
   })
 

@@ -194,7 +194,7 @@ export function VmActionsMenu({ vm, lifecycle = true, children }: {
             </DropdownMenu.Item>
             <DropdownMenu.Item className={itemCls}
               onSelect={() => setPanel('cdrom')}>
-              <Icon name="album" size={16} /> Mount ISO
+              <Icon name="album" size={16} /> Mount/Eject ISO
             </DropdownMenu.Item>
             <DropdownMenu.Item className={itemCls}
               disabled={snapshotDenied} title={snapshotDenied ? NOT_IN_PLAN : undefined}

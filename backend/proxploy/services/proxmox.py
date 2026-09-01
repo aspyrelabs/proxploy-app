@@ -408,12 +408,31 @@ class ProxmoxClient:
             raise self._wrap("permission read failed", e) from e
 
     def role_privileges(self, roleid: str) -> set[str] | None:
+        """The privileges this role holds, or None when that cannot be read.
+
+        GET /access/roles/{roleid} answers with a MAPPING of privilege name to
+        1, not with the `privs` comma string that the LIST endpoint puts on
+        each row. Reading it as the list shape returned an empty set, which is
+        indistinguishable from a role that holds nothing, and the caller then
+        wrote only the privileges it thought were missing: on real hardware
+        that replaced ProxployLifecycle with two privileges and dropped the
+        other eighteen. Both shapes are accepted here, and an empty answer is
+        None, because no role Proxploy manages is ever legitimately empty and
+        guessing wrong destroys an operator's access.
+        """
         try:
             row = self._connect().access.roles(roleid).get()
         except Exception:
             return None
-        privs = (row or {}).get("privs") or ""
-        return {p for p in privs.split(",") if p}
+        if not row:
+            return None
+        if isinstance(row, dict) and "privs" in row:
+            privs = {p for p in str(row.get("privs") or "").split(",") if p}
+        elif isinstance(row, dict):
+            privs = {str(k) for k, v in row.items() if v}
+        else:
+            return None
+        return privs or None
 
     def cluster_resources(self) -> list[dict]:
         """One bulk call: every node/CT/VM/storage row for this endpoint.

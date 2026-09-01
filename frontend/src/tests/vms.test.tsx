@@ -188,7 +188,7 @@ describe('VmActionBar', () => {
   it('lists the menu actions in order, Delete last and destructive', async () => {
     wrap({ ...VM, status: 'running' })
     openMenu()
-    expect(await items()).toEqual(['Shutdown', 'Pause', 'Firewall', 'Options', 'Mount ISO',
+    expect(await items()).toEqual(['Shutdown', 'Pause', 'Firewall', 'Options', 'Mount/Eject ISO',
                                    'Take snapshot', 'Clone', 'Backup', 'Delete'])
     const all = screen.getAllByRole('menuitem')
     const del = all[all.length - 1]
@@ -206,7 +206,7 @@ describe('VmActionBar', () => {
     // running guest now branches on status the way Pause always did.
     wrap({ ...VM, status: 'stopped' })
     openMenu()
-    expect(await items()).toEqual(['Firewall', 'Options', 'Mount ISO', 'Take snapshot',
+    expect(await items()).toEqual(['Firewall', 'Options', 'Mount/Eject ISO', 'Take snapshot',
                                    'Clone', 'Backup', 'Delete'])
   })
 
@@ -217,7 +217,7 @@ describe('VmActionBar', () => {
     // suspended guest, so the way out is Resume and then Shutdown.
     wrap({ ...VM, status: 'paused' })
     openMenu()
-    expect(await items()).toEqual(['Resume', 'Firewall', 'Options', 'Mount ISO',
+    expect(await items()).toEqual(['Resume', 'Firewall', 'Options', 'Mount/Eject ISO',
                                    'Take snapshot', 'Clone', 'Backup', 'Delete'])
   })
 

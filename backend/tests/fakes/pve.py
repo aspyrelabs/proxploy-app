@@ -51,7 +51,13 @@ class _RoleLeaf:
         privs = self._owner.roles_by_id.get(self._roleid)
         if privs is None:
             raise ConnectionError(f"fake PVE has no role {self._roleid}")
-        return {"privs": privs}
+        # The MAPPING of privilege to 1 that PVE really answers here. This
+        # used to return the LIST endpoint's {"privs": "A,B"} instead, and
+        # that one wrong line is why the parse bug reached real hardware and
+        # replaced a role's eighteen privileges with two: every test agreed
+        # with the code because both were reading a shape PVE never sends.
+        names = privs.split(",") if isinstance(privs, str) else list(privs)
+        return {p: 1 for p in names if p}
 
 
 class _RolesFactory:

@@ -217,12 +217,20 @@ const NO_AGENT = 'Proxmox can only see the size of the disk, not how full it is.
 
 /** Identical to AppTable's Meter, deliberately: the two tables draw the same
  *  columns and a divergence here would show up as one row rhythm on Apps and
- *  another on VMs. The "no reading" case does not come through here at all,
- *  see the storage cell above. */
+ *  another on VMs. A null pct draws no track at all, only the word: the
+ *  storage cell below reached that answer first, and a bar at nought reads
+ *  as a real measurement of nothing. */
 function Meter({ pct, gradient }: { pct: number | null; gradient: string }) {
   // gap-[3px], not gap-2: 8px of air between a bar and the number that reads
   // it left the pair looking like two separate things. Whole pixels because a
   // fraction lands on a device-pixel boundary and blurs.
+  if (pct == null) {
+    return (
+      <div className="flex w-28 items-center">
+        <span className="font-mono text-[11px] text-text-3">{fmtPct(pct)}</span>
+      </div>
+    )
+  }
   return (
     <div className="flex w-28 items-center gap-[3px]">
       <div className="flex-1"><UsageBar pct={pct} gradient={gradient} /></div>

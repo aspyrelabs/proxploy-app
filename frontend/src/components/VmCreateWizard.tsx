@@ -9,6 +9,7 @@ import { inputCls } from './LoginForm'
 import { StepRail, type RailStep } from './StepRail'
 import { Button } from './ui/button'
 import { Dialog } from './ui/dialog'
+import { isoName } from './VmCdromDialog'
 import { Loading } from './ui/loading'
 
 // Deliberately local row types: the wizard reads endpoints directly, so the
@@ -469,7 +470,9 @@ export function VmCreateWizard({ onClose }: { onClose: (vmid?: number) => void }
                   : isos.isLoading
                     ? <option value="">Loading ISOs…</option>
                     : <option value="">Select an ISO…</option>}
-                {(isos.data ?? []).map((v) => <option key={v.volid} value={v.volid}>{v.volid}</option>)}
+                {(isos.data ?? []).map((v) => (
+                  <option key={v.volid} value={v.volid}>{isoName(v.volid)}</option>
+                ))}
               </select>
             </Field>
             <Field id="vm-ostype" label="OS type">
@@ -500,7 +503,9 @@ export function VmCreateWizard({ onClose }: { onClose: (vmid?: number) => void }
                     : virtioIsos.isLoading
                       ? <option value="">Loading ISOs…</option>
                       : <option value="">Select an ISO…</option>}
-                  {(virtioIsos.data ?? []).map((v) => <option key={v.volid} value={v.volid}>{v.volid}</option>)}
+                  {(virtioIsos.data ?? []).map((v) => (
+                    <option key={v.volid} value={v.volid}>{isoName(v.volid)}</option>
+                  ))}
                 </select>
               </Field>
             )}

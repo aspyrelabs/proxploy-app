@@ -261,3 +261,49 @@ def test_role_privileges_that_could_not_be_read_never_produces_a_stripping_comma
         body = r.json()
         assert body["missing"] == {"ProxployConsole": ["Sys.Console"]}
         assert body["commands"] == []
+
+
+def test_role_privileges_reads_the_shape_pve_actually_returns():
+    """GET /access/roles/{roleid} answers with a MAPPING of privilege to 1.
+    Only the LIST endpoint puts a `privs` comma string on each row. Reading
+    the single-role answer as the list shape produced an empty set, which the
+    repair could not tell apart from a role holding nothing, so it wrote only
+    the privileges it thought were missing. On real hardware that replaced
+    ProxployLifecycle's eighteen privileges with two, and the next boot wrote
+    the eighteen back without the two, flipping between the pair forever.
+    The earlier union test never caught it because it handed the function a
+    set it had built itself, so the parse was never exercised."""
+    from proxploy.services.proxmox import ProxmoxClient
+    from tests.fakes.pve import FakePVE, make_fake_factory
+
+    fake = FakePVE(version={"release": "9.0"})
+    fake.roles_by_id["ProxployConsole"] = ["VM.Console", "Sys.Console", "VM.Monitor"]
+    c = ProxmoxClient("https://10.0.0.5:8006", "proxploy@pve!mon", "s3cret",
+                      factory=make_fake_factory(fake))
+    assert c.role_privileges("ProxployConsole") == {
+        "VM.Console", "Sys.Console", "VM.Monitor"}
+
+
+def test_a_role_that_reads_back_empty_is_unknown_and_is_never_written():
+    """An empty answer and an unreadable one mean the same thing here: no role
+    Proxploy manages is legitimately empty, and treating either as "holds
+    nothing" is what let a repair replace a whole role. Both must produce no
+    command at all."""
+    from proxploy.services.pveum import repair_commands
+
+    plan = {"ProxployConsole": ["Sys.Console"]}
+    assert repair_commands(plan, {"ProxployConsole": None}) == []
+    assert repair_commands(plan, {"ProxployConsole": set()}) == []
+
+
+def test_repair_writes_existing_plus_new_never_new_alone():
+    """The rule the whole feature rests on. pveum role modify REPLACES, so a
+    command carrying only the missing privileges deletes every other one the
+    role holds, including any an operator added by hand."""
+    from proxploy.services.pveum import repair_commands
+
+    existing = {"ProxployConsole": {"VM.Console", "VM.Monitor"}}
+    cmds = repair_commands({"ProxployConsole": ["Sys.Console"]}, existing)
+    assert len(cmds) == 1
+    for priv in ("VM.Console", "VM.Monitor", "Sys.Console"):
+        assert priv in cmds[0], f"{priv} was dropped by the repair"

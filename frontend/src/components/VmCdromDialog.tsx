@@ -86,13 +86,14 @@ export function VmCdromDialog({ vm, onClose }: { vm: VmRow; onClose: () => void 
         <div className="mt-3"><Loading label="Reading the CD-ROM drive" size={16} /></div>
       ) : (
         <div className="mt-3">
-          <p className="mb-3 font-mono text-[12.5px] text-text-2">
+          <p className="mb-3 truncate font-mono text-[12.5px] text-text-2"
+            title={status.data?.volid ?? undefined}>
             {status.data?.mounted && status.data.volid
               ? isoName(status.data.volid)
               : 'Nothing mounted'}
           </p>
           <div className="flex flex-wrap items-end gap-2">
-            <div>
+            <div className="min-w-0 flex-1">
               <label htmlFor="vmcdrom-store" className={smallLabel}>Datastore</label>
               <select id="vmcdrom-store" className={inputCls} value={store}
                 disabled={storages.isError || storages.isLoading}
@@ -101,7 +102,7 @@ export function VmCdromDialog({ vm, onClose }: { vm: VmRow; onClose: () => void 
                 {storeOpts.map((s) => <option key={s} value={s}>{s}</option>)}
               </select>
             </div>
-            <div>
+            <div className="min-w-0 flex-1">
               <label htmlFor="vmcdrom-iso" className={smallLabel}>ISO image</label>
               <select id="vmcdrom-iso" className={inputCls} value={iso}
                 disabled={store === '' || isos.isError || isos.isLoading}
@@ -111,7 +112,9 @@ export function VmCdromDialog({ vm, onClose }: { vm: VmRow; onClose: () => void 
                   : isos.isLoading
                     ? <option value="">Loading ISOs…</option>
                     : <option value="">Select an ISO…</option>}
-                {(isos.data ?? []).map((v) => <option key={v.volid} value={v.volid}>{v.volid}</option>)}
+                {(isos.data ?? []).map((v) => (
+                  <option key={v.volid} value={v.volid}>{isoName(v.volid)}</option>
+                ))}
               </select>
             </div>
             <Button size="sm" disabled={!iso || write.isPending} onClick={() => write.mutate(iso)}>
