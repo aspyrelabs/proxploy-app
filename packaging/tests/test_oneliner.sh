@@ -24,6 +24,9 @@ echo "OK: the bundle has no \$SCRIPT_DIR dependency left"
 # the shape `curl -fsSL ... | bash` actually produces. Argument parsing and
 # defaulting happen long before anything is fetched or installed, so a non-root
 # dry parse proves it gets past them without a network or a release.
+# shellcheck disable=SC2002 # The cat is the point: `bash -s < file` hands
+# bash a seekable file, and `curl | bash` does not. A pipe is the shape
+# under test, so the "useless" cat is what makes this a real reproduction.
 out=$(cd "$work" && cat "$work/install.sh" | bash -s -- --shape systemd --dry-parse 2>&1) \
   || { echo "FAIL: the piped installer exited non-zero:"; echo "$out"; exit 1; }
 case "$out" in

@@ -171,7 +171,10 @@ test('a stranger onboards, installs an app, creates a VM and schedules a backup'
     await dialog.getByRole('button', { name: 'Next' }).click()
 
     await dialog.getByLabel('ISO storage').selectOption({ label: 'local' })
-    await dialog.getByLabel('ISO image').selectOption({ label: ISO_VOLID })
+    // By value, not label: the option's text is isoName(volid), the filename
+    // half, while ISO_VOLID is the whole volid, which is what the <option>
+    // carries as its value and what the create call actually sends.
+    await dialog.getByLabel('ISO image').selectOption(ISO_VOLID)
     await dialog.getByRole('button', { name: 'Next' }).click()
 
     await dialog.getByLabel('Target storage').selectOption({ label: 'local-lvm' })

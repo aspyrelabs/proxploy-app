@@ -526,12 +526,19 @@ EOS
   command -v python3 >/dev/null 2>&1 || return 0
   # Asked of the interpreter rather than parsed out of --version: the string
   # format is not a promise and this is the number that actually decides.
-  python3 - "$PY_MIN_MAJOR" "$PY_MIN_MINOR" <<'EOF' || die \
-    "python3 $(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')\
- is too old: Proxploy needs 3.11 or newer. Debian 12+ or Ubuntu 24.04+ ships one."
+  if ! python3 - "$PY_MIN_MAJOR" "$PY_MIN_MINOR" <<'EOF'
 import sys
 sys.exit(0 if sys.version_info[:2] >= (int(sys.argv[1]), int(sys.argv[2])) else 1)
 EOF
+  then
+    # Asked in its own statement rather than inline in the die: a $( ) holding
+    # single-quoted Python that itself holds double quotes, inside a
+    # double-quoted string, is valid bash that shellcheck cannot parse, and it
+    # took the whole file's static checking down with it.
+    have=$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')
+    die "python3 $have is too old: Proxploy needs 3.11 or newer." \
+        "Debian 12+ or Ubuntu 24.04+ ships one."
+  fi
 }
 
 resolve_version

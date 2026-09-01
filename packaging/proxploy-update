@@ -224,7 +224,10 @@ elif grep -qE '^PROXPLOY_ENV=dev[[:space:]]*$' "$PP_ENV" 2>/dev/null; then
   if grep -qE '^PROXPLOY_ENV=prod$' "$tmp_env"; then
     cat "$tmp_env" > "$PP_ENV"
     rm -f "$tmp_env"
-    set -a; . "$PP_ENV"; set +a
+    set -a
+    # shellcheck source=/dev/null
+    . "$PP_ENV"
+    set +a
     log "PROXPLOY_ENV is now prod; updates will come from proxploy.com"
   else
     rm -f "$tmp_env"
