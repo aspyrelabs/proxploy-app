@@ -1,11 +1,11 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const calls: { path: string; method: string; body: any }[] = []
 let features: Record<string, boolean> = { 'vms.create': true, 'vms.clone': true }
 let cloneRejects = false
-let vmsListResult: 'ok' | 'empty' | 'error' = 'ok'
+let vmsListResult: 'ok' | 'empty' | 'error' | 'withPending' = 'ok'
 // A two-node cluster shaped exactly as GET /storage really answers for one:
 // its dedupe drops host_id from the key, so EVERY row comes back owned by
 // whichever host polled first, and a SHARED datastore comes back once, under
@@ -20,6 +20,12 @@ const VM = {
   id: 9, host_id: 1, host_name: 'host-01', vmid: 201, name: 'win11',
   status: 'running', os_type: 'win11', cpu_cores: 4, cpu_pct: 3,
   mem_bytes: 8589934592, disk_bytes: 68719476736, uptime_s: 3600, guest_agent_ok: null,
+}
+
+const PENDING_VM = {
+  id: 20, host_id: 1, host_name: 'host-01', vmid: 501, name: 'ubuntu-lab',
+  status: 'stopped', os_type: 'l26', cpu_cores: 2, cpu_pct: 0,
+  mem_bytes: 0, disk_bytes: 0, uptime_s: 0, guest_agent_ok: null,
 }
 
 vi.mock('../api/client', () => {
@@ -37,7 +43,9 @@ vi.mock('../api/client', () => {
         if (path === '/entitlements') return Promise.resolve({ tier: 'builtin', features, grace: null, clock_skew: false })
         if (path === '/vms') {
           if (vmsListResult === 'error') return Promise.reject(new ApiError(502, { detail: 'boom' }))
-          return Promise.resolve(vmsListResult === 'empty' ? [] : [VM])
+          if (vmsListResult === 'empty') return Promise.resolve([])
+          if (vmsListResult === 'withPending') return Promise.resolve([VM, PENDING_VM])
+          return Promise.resolve([VM])
         }
         if (path === '/hosts') {
           if (clusterFixture) return Promise.resolve([
@@ -99,7 +107,7 @@ vi.mock('../api/client', () => {
       if (cloneHeld && path.endsWith('/clone')) {
         return new Promise((resolve) => { releaseClone = resolve })
       }
-      return Promise.resolve({ job: { id: 11, kind: 'vm.create', status: 'queued' } })
+      return Promise.resolve({ job: { id: 11, kind: 'vm.create', status: 'queued' }, vmid: 501 })
     }),
   }
 })
@@ -143,12 +151,13 @@ describe('VmCreateWizard', () => {
     next()
     // nfs-shared on purpose: it is shared, so it is the one ISO datastore
     // offered to BOTH hosts, which is what lets one helper serve both cases.
-    await screen.findByLabelText(/iso storage/i)
-    await screen.findByRole('option', { name: 'nfs-shared' })
-    fireEvent.change(screen.getByLabelText(/iso storage/i), { target: { value: 'nfs-shared' } })
+    const isoStorageSelect = await screen.findByLabelText(/^iso storage$/i)
+    await within(isoStorageSelect).findByRole('option', { name: 'nfs-shared' })
+    fireEvent.change(isoStorageSelect, { target: { value: 'nfs-shared' } })
     await screen.findByRole('option', { name: 'local:iso/ubuntu-24.04.iso' })
-    fireEvent.change(screen.getByLabelText(/iso image/i),
+    fireEvent.change(screen.getByLabelText(/^iso image$/i),
       { target: { value: 'local:iso/ubuntu-24.04.iso' } })
+    next()
     next()
     return await screen.findByLabelText(/target storage/i)
   }
@@ -183,7 +192,7 @@ describe('VmCreateWizard', () => {
     expect(within(select).queryByRole('option', { name: 'local' })).toBeNull()
   })
 
-  it('walks Target → OS → Resources → Network → Confirm and posts the assembled spec', async () => {
+  it('walks Target → OS → System → Disks → CPU & Memory → Network → Confirm and posts the assembled spec', async () => {
     wrap(<VmCreateWizard onClose={() => {}} />)
 
     // Every <select> renders empty and fills in when its query resolves, so each
@@ -197,24 +206,28 @@ describe('VmCreateWizard', () => {
     fireEvent.change(screen.getByLabelText(/vm name/i), { target: { value: 'ubuntu-lab' } })
     next()
 
-    fireEvent.change(await screen.findByLabelText(/iso storage/i), { target: { value: 'local' } })
+    fireEvent.change(await screen.findByLabelText(/^iso storage$/i), { target: { value: 'local' } })
     // The ISO list only loads once a datastore is picked; wait for the <option>
     // itself, or fireEvent.change sets a value that has no matching option.
     await screen.findByRole('option', { name: 'local:iso/ubuntu-24.04.iso' })
-    fireEvent.change(screen.getByLabelText(/iso image/i),
+    fireEvent.change(screen.getByLabelText(/^iso image$/i),
       { target: { value: 'local:iso/ubuntu-24.04.iso' } })
     fireEvent.change(screen.getByLabelText(/os type/i), { target: { value: 'l26' } })
     next()
 
-    fireEvent.change(screen.getByLabelText(/cores/i), { target: { value: '4' } })
-    fireEvent.change(screen.getByLabelText(/memory/i), { target: { value: '4096' } })
+    next()
+
     fireEvent.change(screen.getByLabelText(/disk size/i), { target: { value: '64' } })
     await screen.findByRole('option', { name: 'local-lvm' })
     fireEvent.change(screen.getByLabelText(/target storage/i), { target: { value: 'local-lvm' } })
     next()
 
+    fireEvent.change(screen.getByLabelText(/^cores$/i), { target: { value: '4' } })
+    fireEvent.change(screen.getByLabelText(/^memory \(mb\)$/i), { target: { value: '4096' } })
+    next()
+
     await screen.findByRole('option', { name: 'vmbr0' })
-    fireEvent.change(screen.getByLabelText(/bridge/i), { target: { value: 'vmbr0' } })
+    fireEvent.change(screen.getByLabelText(/^bridge$/i), { target: { value: 'vmbr0' } })
     fireEvent.change(screen.getByLabelText(/vlan tag/i), { target: { value: '20' } })
     next()
 
@@ -233,6 +246,122 @@ describe('VmCreateWizard', () => {
     // InstallDialog pattern: the body swaps for the job log once the job lands.
     expect(await screen.findByText('No output yet.')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Close' })).toBeInTheDocument()
+  })
+
+  it('builds a Windows 11 VM with EFI, TPM, agent and VirtIO drivers, and posts the exact spec', async () => {
+    wrap(<VmCreateWizard onClose={() => {}} />)
+    await screen.findByRole('option', { name: 'host-01' })
+    fireEvent.change(screen.getByLabelText(/^host$/i), { target: { value: '1' } })
+    fireEvent.change(screen.getByLabelText(/vm name/i), { target: { value: 'win11-vm' } })
+    next()
+
+    fireEvent.change(await screen.findByLabelText(/^iso storage$/i), { target: { value: 'local' } })
+    await screen.findByRole('option', { name: 'local:iso/ubuntu-24.04.iso' })
+    fireEvent.change(screen.getByLabelText(/^iso image$/i),
+      { target: { value: 'local:iso/ubuntu-24.04.iso' } })
+    fireEvent.change(screen.getByLabelText(/os type/i), { target: { value: 'win11' } })
+    fireEvent.change(screen.getByLabelText(/virtio drivers storage/i), { target: { value: 'local' } })
+    const virtioIsoSelect = await screen.findByLabelText(/virtio drivers iso/i)
+    await within(virtioIsoSelect).findByRole('option', { name: 'local:iso/ubuntu-24.04.iso' })
+    fireEvent.change(virtioIsoSelect, { target: { value: 'local:iso/ubuntu-24.04.iso' } })
+    next()
+
+    fireEvent.change(screen.getByLabelText(/^machine$/i), { target: { value: 'q35' } })
+    fireEvent.change(screen.getByLabelText(/^bios$/i), { target: { value: 'ovmf' } })
+    await screen.findByLabelText(/efi storage/i)
+    await screen.findByRole('option', { name: 'local-lvm' })
+    fireEvent.change(screen.getByLabelText(/efi storage/i), { target: { value: 'local-lvm' } })
+    fireEvent.click(screen.getByLabelText(/add tpm/i))
+    fireEvent.change(await screen.findByLabelText(/tpm storage/i), { target: { value: 'local-lvm' } })
+    fireEvent.click(screen.getByLabelText(/qemu guest agent/i))
+    next()
+
+    await screen.findByRole('option', { name: 'local-lvm' })
+    fireEvent.change(screen.getByLabelText(/target storage/i), { target: { value: 'local-lvm' } })
+    next()
+
+    next()
+
+    await screen.findByRole('option', { name: 'vmbr0' })
+    fireEvent.change(screen.getByLabelText(/^bridge$/i), { target: { value: 'vmbr0' } })
+    next()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }))
+    await waitFor(() => expect(calls.length).toBe(1))
+    expect(calls[0].body).toEqual({
+      host_id: 1, node: 'pve1', name: 'win11-vm', vmid: null,
+      pool: '', tags: '', onboot: false,
+      startup_order: '', startup_up: '', startup_down: '', start: false,
+
+      iso: 'local:iso/ubuntu-24.04.iso', virtio_iso: 'local:iso/ubuntu-24.04.iso', ostype: 'win11',
+
+      machine: 'q35', bios: 'ovmf', vga: '', scsihw: 'virtio-scsi-single',
+      efi_disk: true, efi_storage: 'local-lvm', efi_pre_enrolled_keys: true,
+      tpm: true, tpm_storage: 'local-lvm', tpm_version: 'v2.0',
+      agent: true, agent_type: 'virtio', agent_fstrim: false,
+
+      disk_bus: 'scsi', disk_gb: 32, storage: 'local-lvm',
+      disk_cache: '', disk_aio: '', disk_discard: false, disk_iothread: false, disk_ssd: false,
+      disk_backup: true, disk_replicate: true,
+      disk_mbps_rd: null, disk_mbps_wr: null, disk_iops_rd: null, disk_iops_wr: null,
+
+      sockets: 1, cores: 2, cpu_type: '', cpu_flags: '',
+      vcpus: null, cpulimit: null, cpuunits: null, numa: false,
+
+      memory_mb: 2048, ballooning: true, balloon_mb: null, shares: null,
+
+      net: true, bridge: 'vmbr0', vlan_tag: null, net_model: 'virtio', net_macaddr: '',
+      net_mtu: null, net_queues: null, net_rate: null, net_firewall: false, net_link_down: false,
+    })
+  })
+
+  it('sends net: false when the network device is turned off', async () => {
+    wrap(<VmCreateWizard onClose={() => {}} />)
+    await screen.findByRole('option', { name: 'host-01' })
+    fireEvent.change(screen.getByLabelText(/^host$/i), { target: { value: '1' } })
+    fireEvent.change(screen.getByLabelText(/vm name/i), { target: { value: 'no-net' } })
+    next()
+
+    fireEvent.change(await screen.findByLabelText(/^iso storage$/i), { target: { value: 'local' } })
+    await screen.findByRole('option', { name: 'local:iso/ubuntu-24.04.iso' })
+    fireEvent.change(screen.getByLabelText(/^iso image$/i),
+      { target: { value: 'local:iso/ubuntu-24.04.iso' } })
+    next()
+
+    next()
+
+    await screen.findByRole('option', { name: 'local-lvm' })
+    fireEvent.change(screen.getByLabelText(/target storage/i), { target: { value: 'local-lvm' } })
+    next()
+
+    next()
+
+    fireEvent.click(screen.getByLabelText(/no network device/i))
+    expect(screen.queryByLabelText(/^bridge$/i)).not.toBeInTheDocument()
+    next()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }))
+    await waitFor(() => expect(calls.length).toBe(1))
+    expect(calls[0].body).toMatchObject({ net: false })
+  })
+
+  it('hides SSD emulation when the disk bus is virtio', async () => {
+    wrap(<VmCreateWizard onClose={() => {}} />)
+    await screen.findByRole('option', { name: 'host-01' })
+    fireEvent.change(screen.getByLabelText(/^host$/i), { target: { value: '1' } })
+    fireEvent.change(screen.getByLabelText(/vm name/i), { target: { value: 'x' } })
+    next()
+
+    fireEvent.change(await screen.findByLabelText(/^iso storage$/i), { target: { value: 'local' } })
+    await screen.findByRole('option', { name: 'local:iso/ubuntu-24.04.iso' })
+    fireEvent.change(screen.getByLabelText(/^iso image$/i),
+      { target: { value: 'local:iso/ubuntu-24.04.iso' } })
+    next()
+    next()
+
+    expect(screen.getByLabelText(/ssd emulation/i)).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText(/^bus$/i), { target: { value: 'virtio' } })
+    expect(screen.queryByLabelText(/ssd emulation/i)).not.toBeInTheDocument()
   })
 
   it('still asks for the node when the host is a real cluster with more than one', async () => {
@@ -258,8 +387,9 @@ describe('VmCreateWizard', () => {
     fireEvent.change(screen.getByLabelText(/^host$/i), { target: { value: '1' } })
     fireEvent.change(screen.getByLabelText(/vm name/i), { target: { value: 'x' } })
     next()
-    await screen.findByRole('option', { name: 'local' })
-    fireEvent.change(screen.getByLabelText(/iso storage/i), { target: { value: 'local' } })
+    const isoStorageSelect = await screen.findByLabelText(/^iso storage$/i)
+    await within(isoStorageSelect).findByRole('option', { name: 'local' })
+    fireEvent.change(isoStorageSelect, { target: { value: 'local' } })
     await waitFor(() =>
       expect(api).toHaveBeenCalledWith('/storage/1/local/content?node=pve1&content=iso'))
   })
@@ -278,7 +408,7 @@ describe('VmCreateWizard rail', () => {
   it('renders one rail entry per step', async () => {
     wrap(<VmCreateWizard onClose={() => {}} />)
     await screen.findByRole('option', { name: 'host-01' })
-    for (const label of ['Target', 'OS', 'Resources', 'Network', 'Confirm']) {
+    for (const label of ['Target', 'OS', 'System', 'Disks', 'CPU & Memory', 'Network', 'Confirm']) {
       expect(screen.getByRole('button', { name: new RegExp(`^${label}$`, 'i') })).toBeInTheDocument()
     }
   })
@@ -358,6 +488,79 @@ describe('VmsPage create/clone affordances', () => {
     // one-off strings), and one menu explaining three denials three different
     // ways reads as three different problems.
     expect(item).toHaveAttribute('title', 'Not included in your plan')
+  })
+})
+
+describe('VmsPage pending VM indicator', () => {
+  beforeEach(() => {
+    calls.length = 0
+    cloneRejects = false
+    features = { 'vms.create': true, 'vms.clone': true }
+    vmsListResult = 'ok'
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  // Stops right before Close: the fast-poll and the 30s give-up timer are
+  // both started by that click, so fake timers must already be active by
+  // then, or those timers get scheduled against the real clock instead.
+  const walkWizardToCreated = async () => {
+    wrap(<VmsPage />)
+    fireEvent.click(await screen.findByRole('button', { name: 'New VM' }))
+    await screen.findByRole('option', { name: 'host-01' })
+    fireEvent.change(screen.getByLabelText(/^host$/i), { target: { value: '1' } })
+    fireEvent.change(screen.getByLabelText(/vm name/i), { target: { value: 'ubuntu-lab' } })
+    next()
+
+    fireEvent.change(await screen.findByLabelText(/^iso storage$/i), { target: { value: 'local' } })
+    await screen.findByRole('option', { name: 'local:iso/ubuntu-24.04.iso' })
+    fireEvent.change(screen.getByLabelText(/^iso image$/i),
+      { target: { value: 'local:iso/ubuntu-24.04.iso' } })
+    next()
+
+    next()
+
+    await screen.findByRole('option', { name: 'local-lvm' })
+    fireEvent.change(screen.getByLabelText(/target storage/i), { target: { value: 'local-lvm' } })
+    next()
+
+    next()
+
+    await screen.findByRole('option', { name: 'vmbr0' })
+    fireEvent.change(screen.getByLabelText(/^bridge$/i), { target: { value: 'vmbr0' } })
+    next()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }))
+    await screen.findByText('No output yet.')
+  }
+
+  it('shows a spinner for the new VM and clears it once the guest shows up in the list', async () => {
+    await walkWizardToCreated()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+
+    expect(screen.getByText(/Creating VM 501/)).toBeInTheDocument()
+    expect(screen.getByRole('status', { name: 'Creating the VM' })).toBeInTheDocument()
+
+    vmsListResult = 'withPending'
+    await waitFor(() => expect(screen.queryByText(/Creating VM 501/)).toBeNull(), { timeout: 5000 })
+    expect(screen.queryByRole('status', { name: 'Creating the VM' })).toBeNull()
+  })
+
+  it('gives up after 30 seconds and points at Activity instead of spinning forever', async () => {
+    await walkWizardToCreated()
+
+    vi.useFakeTimers()
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+    expect(screen.getByText(/Creating VM 501/)).toBeInTheDocument()
+
+    await vi.advanceTimersByTimeAsync(30000)
+
+    expect(screen.queryByText(/Creating VM 501/)).toBeNull()
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      /VM 501 has not shown up yet\. Check Activity/)
   })
 })
 

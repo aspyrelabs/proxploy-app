@@ -22,6 +22,7 @@ const ISO_VOL = {
 
 let features: Record<string, boolean> = { 'storage.manage': true }
 const calls: { path: string; opts?: any }[] = []
+let uploadJob: Record<string, unknown> | null = null
 
 vi.mock('../api/client', () => ({
   api: vi.fn((path: string, opts?: any) => {
@@ -32,6 +33,7 @@ vi.mock('../api/client', () => ({
                                grace: null, clock_skew: false })
     }
     if (path === '/hosts') return Promise.resolve([{ id: 1, name: 'host-01' }])
+    if (/^\/jobs\/\d+$/.test(path)) return Promise.resolve(uploadJob)
     if (path.endsWith('/events')) return Promise.resolve([])
     if (path === '/storage') return Promise.resolve([LOCAL, LOCAL_LVM])
     if (path.startsWith('/storage/1/local-lvm/content')) return Promise.resolve([ISO_VOL])
@@ -127,6 +129,7 @@ class FakeXHR {
 beforeEach(() => {
   calls.length = 0
   features = { 'storage.manage': true }
+  uploadJob = null
   document.cookie = 'pp_csrf=csrf-token-abc'
   FakeXHR.instances.length = 0
   vi.stubGlobal('XMLHttpRequest', FakeXHR)
@@ -163,17 +166,18 @@ describe('UploadDialog', () => {
   it('swaps the body for the job log once the upload returns a job', async () => {
     const xhr = await start()
     act(() => xhr.respond(202, { job: { id: 9, kind: 'storage.upload' } }))
-    expect(await screen.findByRole('button', { name: 'Close' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Upload in background' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Upload' })).toBeNull()
   })
 
-  it('progress events drive the bar\'s value', async () => {
+  it('progress events drive the bar\'s value, scaled to the first half of the bar', async () => {
     const xhr = await start()
     act(() => xhr.upload.onprogress?.({ lengthComputable: true, loaded: 50, total: 200 }))
 
     const bar = await screen.findByRole('progressbar')
-    expect(bar).toHaveAttribute('aria-valuenow', '25')
+    expect(bar).toHaveAttribute('aria-valuenow', '13')
     expect(bar).toHaveAttribute('aria-busy', 'false')
+    expect(screen.getByText('Sending to Proxploy')).toBeInTheDocument()
   })
 
   it('shows the file size, bytes sent, speed and time remaining once there is enough data', async () => {
@@ -215,7 +219,7 @@ describe('UploadDialog', () => {
     expect(document.body.textContent).toMatch(/unknown/)
   })
 
-  it('Cancel aborts the in-flight upload instead of leaving it running in the background, and does not toast an error for it', async () => {
+  it('Cancel aborts the in-flight upload, returns to the pre-upload form and does not toast an error for it', async () => {
     const onClose = vi.fn()
     withQuery(<UploadDialog hostId={1} storage="local" node="pve1"
       contentTypes={['iso']} onClose={onClose} />)
@@ -231,14 +235,89 @@ describe('UploadDialog', () => {
       await Promise.resolve()
     })
     expect(FakeXHR.instances[0].aborted).toBe(true)
-    expect(onClose).toHaveBeenCalled()
+    // Cancel during the upload leg stays in the dialog, it does not close it,
+    // so the operator can pick a different file or close on their own.
+    expect(onClose).not.toHaveBeenCalled()
+    expect(screen.getByText('Upload cancelled. The file was not saved.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Upload' })).toBeInTheDocument()
     expect(notify.error).not.toHaveBeenCalled()
+  })
+
+  it('Cancel is offered again once the upload leg is under way, and closes the dialog before then', async () => {
+    const onClose = vi.fn()
+    withQuery(<UploadDialog hostId={1} storage="local" node="pve1"
+      contentTypes={['iso']} onClose={onClose} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(onClose).toHaveBeenCalled()
+  })
+
+  it('Cancel during the server-side leg posts to the job cancel endpoint and stops the bar', async () => {
+    const xhr = await start()
+    act(() => xhr.respond(202, { job: { id: 9, kind: 'storage.upload' } }))
+    await screen.findByRole('progressbar')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(calls.some((c) =>
+      c.path === '/jobs/9/cancel' && c.opts?.method === 'POST')).toBe(true))
+
+    expect(await screen.findByText(/Upload cancelled/)).toBeInTheDocument()
+    expect(screen.queryByRole('progressbar')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Close' })).toBeInTheDocument()
+  })
+
+  it('offers Upload in background only once a job id exists, and closing that way never cancels the job', async () => {
+    const onClose = vi.fn()
+    withQuery(<UploadDialog hostId={1} storage="local" node="pve1"
+      contentTypes={['iso']} onClose={onClose} />)
+    fireEvent.change(screen.getByLabelText('File'),
+      { target: { files: [new File(['x'], 'a.iso')] } })
+    fireEvent.click(screen.getByRole('button', { name: 'Upload' }))
+    await waitFor(() => expect(FakeXHR.instances).toHaveLength(1))
+
+    // Nothing to background before the job id exists.
+    expect(screen.queryByRole('button', { name: 'Upload in background' })).toBeNull()
+
+    act(() => FakeXHR.instances[0].respond(202, { job: { id: 9, kind: 'storage.upload' } }))
+    const background = await screen.findByRole('button', { name: 'Upload in background' })
+    fireEvent.click(background)
+
+    expect(onClose).toHaveBeenCalled()
+    expect(calls.some((c) => c.path === '/jobs/9/cancel')).toBe(false)
   })
 
   it('surfaces a failed upload the same way a rejected fetch did', async () => {
     const xhr = await start()
     act(() => xhr.respond(500, { detail: 'disk full on pve1' }))
     await waitFor(() => expect(notify.error).toHaveBeenCalledWith('disk full on pve1'))
+  })
+
+  it('keeps the bar moving past leg one using the job\'s progress', async () => {
+    uploadJob = {
+      id: 9, kind: 'storage.upload', status: 'running', target_type: null, target_id: null,
+      params: null, result: null, error: null, progress_pct: 20, requested_by: null,
+      schedule_id: null, started_at: '2026-08-05T00:00:00', finished_at: null,
+      created_at: '2026-08-05T00:00:00',
+    }
+    const xhr = await start()
+    act(() => xhr.respond(202, { job: { id: 9, kind: 'storage.upload' } }))
+
+    await waitFor(() =>
+      expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '60'))
+    expect(screen.getByText('Sending to pve1')).toBeInTheDocument()
+  })
+
+  it('replaces the bar with an explanation instead of spinning when the job dies', async () => {
+    uploadJob = {
+      id: 9, kind: 'storage.upload', status: 'canceled', target_type: null, target_id: null,
+      params: null, result: null, error: null, progress_pct: 40, requested_by: null,
+      schedule_id: null, started_at: '2026-08-05T00:00:00', finished_at: '2026-08-05T00:01:00',
+      created_at: '2026-08-05T00:00:00',
+    }
+    const xhr = await start()
+    act(() => xhr.respond(202, { job: { id: 9, kind: 'storage.upload' } }))
+
+    await screen.findByText(/The upload stopped before it finished/)
+    expect(screen.queryByRole('progressbar')).toBeNull()
   })
 })
 
@@ -392,7 +471,7 @@ describe('UploadDialog name collision', () => {
     await waitFor(() => expect(FakeXHR.instances).toHaveLength(2))
     act(() => FakeXHR.instances[1].respond(202, { job: { id: 12, kind: 'storage.upload' } }))
     expect((FakeXHR.instances[1].body as FormData).get('overwrite')).toBe('true')
-    expect(await screen.findByRole('button', { name: 'Close' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Upload in background' })).toBeInTheDocument()
   })
 
   it('Cancel backs out and uploads nothing', async () => {
@@ -407,5 +486,24 @@ describe('UploadDialog name collision', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
     await waitFor(() => expect(screen.queryByText('ubuntu.iso already exists')).toBeNull())
     expect(FakeXHR.instances).toHaveLength(1)   // nothing was replaced
+  })
+})
+
+describe('UploadDialog content type', () => {
+  it('opens on ISO even when PVE lists vztmpl first', async () => {
+    withQuery(<UploadDialog hostId={1} storage="unraid-test" node="pve1"
+      contentTypes={['import', 'vztmpl', 'iso']} onClose={() => {}} />)
+    const select = await screen.findByLabelText('Content type') as HTMLSelectElement
+    expect(select.value).toBe('iso')
+  })
+
+  it('follows the picked file, so a template is not filed as an ISO', async () => {
+    withQuery(<UploadDialog hostId={1} storage="unraid-test" node="pve1"
+      contentTypes={['import', 'vztmpl', 'iso']} onClose={() => {}} />)
+    const select = await screen.findByLabelText('Content type') as HTMLSelectElement
+    const input = screen.getByLabelText('File') as HTMLInputElement
+    const tmpl = new File(['x'], 'debian-12-standard_12.7-1_amd64.tar.zst')
+    fireEvent.change(input, { target: { files: [tmpl] } })
+    await waitFor(() => expect(select.value).toBe('vztmpl'))
   })
 })

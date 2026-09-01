@@ -238,7 +238,7 @@ export function HostEditDialog({ hostId, host, onClose }: {
           <HostCapabilityList hostId={hostId} />
         </div>
         <div className="rounded-ctl border border-line bg-panel-2 p-3">
-          <HostScriptPanel capabilities={defaultCapabilities} nodeShell={false} />
+          <HostScriptPanel capabilities={defaultCapabilities} />
         </div>
         {/* Kept below the main form: occasional maintenance action, not a
             primary field. */}

@@ -1,15 +1,20 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { createRoute, useNavigate, useSearch } from '@tanstack/react-router'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { api } from '../api/client'
 import type { VmRow } from '../api/hooks'
 import { useEntitlements } from '../api/hooks'
 import { QueryState } from '../components/QueryState'
 import { SkeletonGroup } from '../components/ui/skeleton'
+import { Loading } from '../components/ui/loading'
 import { Button, segment } from '../components/ui/button'
 import { VmCreateWizard } from '../components/VmCreateWizard'
 import { VmTable, VmTableSkeleton } from '../components/VmTable'
 import { TableSorter, useSorted } from '../components/TableSorter'
+
+const PENDING_POLL_MS = 2_000
+const PENDING_TIMEOUT_MS = 30_000
+const IDLE_POLL_MS = 30_000
 
 type HostRow = { id: number; name: string }
 
@@ -20,6 +25,7 @@ export function VmsPage() {
   const navigate = useNavigate()
   const ent = useEntitlements()
   const [creating, setCreating] = useState(false)
+  const [pending, setPending] = useState<{ vmid: number; timedOut: boolean } | null>(null)
   const hostsQuery = useQuery({
     queryKey: ['hosts'],
     queryFn: () => api<HostRow[]>('/hosts'),
@@ -30,8 +36,24 @@ export function VmsPage() {
     queryKey: ['vms', { host: search.host }],
     queryFn: () => api<VmRow[]>(
       search.host != null ? `/vms?host=${search.host}` : '/vms'),
-    refetchInterval: 30_000,
+    refetchInterval: (query) => {
+      if (!pending || pending.timedOut) return IDLE_POLL_MS
+      const found = query.state.data?.some((v) => v.vmid === pending.vmid)
+      return found ? IDLE_POLL_MS : PENDING_POLL_MS
+    },
   })
+
+  useEffect(() => {
+    if (pending && !pending.timedOut && vmsQuery.data?.some((v) => v.vmid === pending.vmid)) {
+      setPending(null)
+    }
+  }, [pending, vmsQuery.data])
+
+  useEffect(() => {
+    if (!pending || pending.timedOut) return
+    const t = setTimeout(() => setPending((p) => (p ? { ...p, timedOut: true } : p)), PENDING_TIMEOUT_MS)
+    return () => clearTimeout(t)
+  }, [pending])
   const needle = (search.q ?? '').trim().toLowerCase()
   const vms = needle
     ? vmsQuery.data?.filter((v) =>
@@ -104,6 +126,19 @@ export function VmsPage() {
                        label="virtual machines" />
         </div>
       </div>
+      {pending && !pending.timedOut && (
+        <div className="mb-4 flex items-center gap-2 rounded-ctl border border-line-soft bg-elev p-2 text-[12.5px] text-text-2">
+          <Loading label="Creating the VM" size={16} />
+          Creating VM {pending.vmid}. It can take up to 30 seconds to show up here.
+        </div>
+      )}
+      {pending && pending.timedOut && (
+        <p role="alert"
+           className="mb-4 rounded-ctl border border-amber/30 bg-amber-dim p-2 text-[12.5px] text-text-2">
+          VM {pending.vmid} has not shown up yet. Check Activity, the bell icon at the top,
+          to see what happened to the job.
+        </p>
+      )}
       <QueryState query={vmsQuery}
                   loading={<SkeletonGroup label="Loading virtual machines">
                     <VmTableSkeleton rows={6} />
@@ -128,7 +163,10 @@ export function VmsPage() {
                    })} />
         )}
       </QueryState>
-      {creating && <VmCreateWizard onClose={() => setCreating(false)} />}
+      {creating && <VmCreateWizard onClose={(vmid) => {
+        setCreating(false)
+        if (vmid != null) setPending({ vmid, timedOut: false })
+      }} />}
     </div>
   )
 }

@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { ApiError } from '../api/client'
+import { TERMINAL, useCancelJob, useJob } from '../api/jobs'
 import { useUploadContent, type VolumeExists } from '../api/storage'
 import { fmtBytes, fmtEta, UNKNOWN } from '../lib/format'
 import { notify } from '../lib/notify'
 import { JobLog } from './JobLog'
 import { Button } from './ui/button'
+import { ButtonGroup, ButtonGroupSeparator } from './ui/button-group'
 import { Dialog } from './ui/dialog'
 import { Progress, ProgressLabel, ProgressValue } from './ui/progress'
 
@@ -14,6 +16,14 @@ import { Progress, ProgressLabel, ProgressValue } from './ui/progress'
 const SPEED_WINDOW_MS = 3000
 
 const LABEL: Record<string, string> = { iso: 'ISO image', vztmpl: 'CT template' }
+
+// PVE lists a datastore's content in its own order, and `["import","vztmpl",
+// "iso"]` is common, so taking the first entry opened the form on CT template
+// and filed a Windows ISO as one.
+const CONTENT_BY_EXT: [RegExp, 'iso' | 'vztmpl'][] = [
+  [/\.iso$/i, 'iso'],
+  [/\.(tar\.(gz|xz|zst|bz2)|tgz|tzst|txz)$/i, 'vztmpl'],
+]
 
 export function UploadDialog({ hostId, storage, node, contentTypes, onClose }: {
   hostId: number; storage: string; node: string; contentTypes: string[]; onClose: () => void
@@ -26,17 +36,31 @@ export function UploadDialog({ hostId, storage, node, contentTypes, onClose }: {
   // TS 5.5+ infers `uploadable` as ("iso" | "vztmpl")[] from the filter guard
   // above; the <select>'s onChange hands back a plain string, so the state
   // itself needs the wider type rather than narrowing every read site.
-  const [content, setContent] = useState<string>(uploadable[0] ?? 'iso')
+  const [content, setContent] = useState<string>(
+    uploadable.includes('iso') ? 'iso' : uploadable[0] ?? 'iso')
   const [file, setFile] = useState<File | null>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  const pickFile = (f: File | null) => {
+    setFile(f)
+    if (!f) return
+    const guess = CONTENT_BY_EXT.find(([re]) => re.test(f.name))?.[1]
+    if (guess && uploadable.includes(guess)) setContent(guess)
+  }
   const [jobId, setJobId] = useState<number | null>(null)
+  const job = useJob(jobId)
+  const cancelJob = useCancelJob()
   // Set when the server says the name is already taken. Replacing is a click,
   // not a typed phrase: the typed confirmation is reserved for deletions,
   // which cannot be undone.
   const [collision, setCollision] = useState<VolumeExists | null>(null)
+  const [leg1Cancelled, setLeg1Cancelled] = useState(false)
+  const [jobCancelledByUser, setJobCancelledByUser] = useState(false)
 
   const submit = (overwrite = false) => {
     if (!file) return
     setCollision(null)
+    setLeg1Cancelled(false)
     upload.mutate({ hostId, storage, node, content, file, overwrite }, {
       onSuccess: (r) => setJobId(r.job.id),
       onError: (e) => {
@@ -55,8 +79,20 @@ export function UploadDialog({ hostId, storage, node, contentTypes, onClose }: {
 
   const handleCancel = () => {
     // Cancel means it now: XHR supports abort (fetch's streaming body did not).
-    if (upload.isPending) upload.abort()
+    if (upload.isPending) {
+      upload.abort()
+      setLeg1Cancelled(true)
+      return
+    }
     onClose()
+  }
+
+  const handleCancelJob = () => {
+    if (jobId == null) return
+    cancelJob.mutate(jobId, {
+      onSuccess: () => setJobCancelledByUser(true),
+      onError: () => notify.error('Could not cancel the upload.'),
+    })
   }
 
   // Speed, smoothed over SPEED_WINDOW_MS; resets when upload.progress goes
@@ -80,12 +116,21 @@ export function UploadDialog({ hostId, storage, node, contentTypes, onClose }: {
 
   // The event only carries a percentage when lengthComputable said so; "X of
   // Y" uses the file's own size, known the moment it is picked.
-  const pct = upload.progress?.total != null
+  const leg1Pct = upload.progress?.total != null
     ? Math.round((upload.progress.loaded / upload.progress.total) * 100)
     : null
   const remaining = upload.progress?.total != null
     ? upload.progress.total - upload.progress.loaded : null
   const eta = speed != null && speed > 0 && remaining != null ? remaining / speed : null
+  const leg1DisplayPct = leg1Pct != null ? leg1Pct / 2 : null
+
+  const jobStatus = job.data?.status ?? null
+  const jobPct = job.data?.progress_pct ?? null
+  const jobDone = jobStatus === 'succeeded'
+  const jobDied = jobStatus != null && TERMINAL.includes(jobStatus) && !jobDone
+  const jobCancelRequested = cancelJob.isPending || jobCancelledByUser
+  const leg2DisplayPct = 50 + (jobPct ?? 0) / 2
+  const leg2Label = jobPct != null && jobPct >= 100 ? 'Finishing up' : `Sending to ${node}`
 
   return (
     <Dialog title={<>Upload to {storage}</>} width={520} onClose={onClose}>
@@ -112,8 +157,33 @@ export function UploadDialog({ hostId, storage, node, contentTypes, onClose }: {
       // Exactly InstallDialog's pattern: the mutation returned {job:{id}},
       // so the dialog becomes the job's live transcript.
       <div className="mt-4">
-        <JobLog jobId={jobId} />
-        <Button className="mt-3" variant="ghost" onClick={onClose}>Close</Button>
+        {jobCancelRequested ? (
+          <div className="rounded-ctl border border-line bg-panel p-3 text-[12.5px] text-text">
+            Upload cancelled. Check Activity for how much reached {node}.
+          </div>
+        ) : jobDied ? (
+          <div className="rounded-ctl border border-red/30 bg-red-dim p-3 text-[12.5px] text-text">
+            The upload stopped before it finished. The server may have restarted. Check Activity for the job.
+          </div>
+        ) : !jobDone && (
+          <Progress value={leg2DisplayPct}>
+            <ProgressLabel>{leg2Label}</ProgressLabel>
+            <ProgressValue />
+          </Progress>
+        )}
+        <div className="mt-3">
+          <JobLog jobId={jobId} />
+        </div>
+        {jobCancelRequested || jobDone || jobDied ? (
+          <Button className="mt-3" variant="ghost" onClick={onClose}>Close</Button>
+        ) : (
+          <div className="mt-3 flex items-center justify-end gap-2">
+            <Button variant="ghost" disabled={cancelJob.isPending} onClick={handleCancelJob}>
+              Cancel
+            </Button>
+            <Button variant="primary" onClick={onClose}>Upload in background</Button>
+          </div>
+        )}
       </div>
     ) : (
       <>
@@ -130,9 +200,31 @@ export function UploadDialog({ hostId, storage, node, contentTypes, onClose }: {
           <div>
             <label htmlFor="upload-file"
               className="mb-1 block text-[11px] uppercase tracking-wide text-text-3">File</label>
-            <input id="upload-file" type="file"
-              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-              className="w-full rounded-ctl border border-line bg-panel px-3 py-1.5 text-[13px] text-text-2" />
+            <input id="upload-file" ref={fileRef} type="file" className="hidden"
+              onChange={(e) => pickFile(e.target.files?.[0] ?? null)} />
+            <ButtonGroup>
+              <Button type="button" size="sm" variant="ghost"
+                disabled={upload.isPending}
+                onClick={() => fileRef.current?.click()}>
+                {file ? 'Choose a different file' : 'Choose file'}
+              </Button>
+              {file && (
+                <>
+                  <ButtonGroupSeparator />
+                  <Button type="button" size="sm" variant="ghost"
+                    disabled={upload.isPending}
+                    onClick={() => {
+                      setFile(null)
+                      if (fileRef.current) fileRef.current.value = ''
+                    }}>
+                    Clear
+                  </Button>
+                </>
+              )}
+            </ButtonGroup>
+            <p className="mt-1.5 text-[12px] text-text-2">
+              {file ? `${file.name} (${fmtBytes(file.size)})` : 'No file chosen yet.'}
+            </p>
           </div>
           <div className="text-[12px] text-text-2">
             The file is streamed through Proxploy to the node, it crosses the
@@ -142,16 +234,16 @@ export function UploadDialog({ hostId, storage, node, contentTypes, onClose }: {
         </div>
         {upload.isPending && (
           <div className="mt-4">
-            <Progress value={pct}>
+            <Progress value={leg1DisplayPct}>
               {/* The bytes finish sending before the request resolves, the
                   server still has to write the file. Saying "Uploading" at
                   100% would claim the job is done when it is not. */}
-              <ProgressLabel>{pct === 100 ? 'Finishing up' : 'Uploading'}</ProgressLabel>
+              <ProgressLabel>{leg1Pct === 100 ? 'Finishing up' : 'Sending to Proxploy'}</ProgressLabel>
               <ProgressValue />
             </Progress>
             <div className="mt-1 flex items-center justify-between font-mono text-[11px] text-text-3">
               <span>{fmtBytes(upload.progress?.loaded ?? 0)} of {fmtBytes(file?.size)}</span>
-              {pct === 100 ? (
+              {leg1Pct === 100 ? (
                 <span>Sent. Waiting for the server to finish.</span>
               ) : (
                 <span>
@@ -162,6 +254,9 @@ export function UploadDialog({ hostId, storage, node, contentTypes, onClose }: {
               )}
             </div>
           </div>
+        )}
+        {leg1Cancelled && (
+          <div className="mt-4 text-[12px] text-text-2">Upload cancelled. The file was not saved.</div>
         )}
         <div className="mt-4 flex items-center justify-end gap-2">
           <Button variant="ghost" onClick={handleCancel}>Cancel</Button>

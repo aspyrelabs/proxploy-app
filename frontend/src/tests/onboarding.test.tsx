@@ -241,13 +241,16 @@ describe('HostForm', () => {
     expect(scriptCalls.at(-1)?.capabilities).toContain('backup')
   })
 
-  it('asks for Sys.Console only when node shells are opted into', async () => {
+  it('never asks about node shells, because onboarding always grants Sys.Console', async () => {
+    // Sys.Console used to ride a separate flag, and the flag reaching the
+    // generator was wired to the App Store SSH consent box sitting BELOW the
+    // Generate button, so it could not be set before the script was written.
+    // It is part of the Console capability now and there is no flag to send.
     withQuery(<HostForm onCreated={() => {}} />)
     fireEvent.click(screen.getByRole('button', { name: /don.t have a token yet/i }))
     fireEvent.click(screen.getByRole('button', { name: 'Generate script' }))
     await screen.findByText(/pveum role add ProxployAudit/)
-    const calls = scriptCalls.at(-1)
-    expect(calls?.node_shell).toBe(false)
+    expect(scriptCalls.at(-1)).not.toHaveProperty('node_shell')
   })
 
   it('leaves TLS verification off by default', () => {

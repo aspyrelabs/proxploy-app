@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query'
 import { createRoute, Link, Outlet, useNavigate, useParams } from '@tanstack/react-router'
 import { api } from '../api/client'
+import { pveWebUrl } from '../lib/utils'
 import { openConsoleWindow } from '../lib/console-window'
 import { notify } from '../lib/notify'
 import type { AppRow, NodeRow, Summary, VmRow } from '../api/hooks'
@@ -493,7 +494,7 @@ export function NodeDetailPage({ inline = false }: { inline?: boolean }) {
           {host?.address && (
             // rel="noopener": without it the opened page can steer this one
             // through window.opener.
-            <a href={host.address} target="_blank" rel="noopener noreferrer"
+            <a href={pveWebUrl(host.address)} target="_blank" rel="noopener noreferrer"
               className={headerCtl}>
               Open Proxmox web UI ↗
             </a>

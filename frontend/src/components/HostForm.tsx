@@ -338,7 +338,7 @@ export function HostForm({ onCreated }: { onCreated: (h: HostCreated) => void })
       </div>
 
       <div className="rounded-card border border-line-soft bg-panel-2 p-4">
-        <HostScriptPanel capabilities={caps} nodeShell={f.ssh_enroll} />
+        <HostScriptPanel capabilities={caps} />
       </div>
 
       <div className="rounded-ctl border border-line-soft bg-elev p-3">

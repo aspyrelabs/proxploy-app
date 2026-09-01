@@ -8,9 +8,7 @@ import { Icon } from './ui/icon'
  *  click, not copied in once: HostForm's own checkboxes decide them live, so
  *  the script reflects whatever is ticked when Generate is pressed, not what
  *  was ticked when this panel first appeared. */
-export function HostScriptPanel({ capabilities, nodeShell }: {
-  capabilities: string[]; nodeShell: boolean
-}) {
+export function HostScriptPanel({ capabilities }: { capabilities: string[] }) {
   const [script, setScript] = useState<string | null>(null)
   const [error, setError] = useState('')
   // Shut until asked. Most operators arrive with a token already made, and an
@@ -23,7 +21,7 @@ export function HostScriptPanel({ capabilities, nodeShell }: {
     try {
       const r = await api<{ script: string }>('/hosts/token-script', {
         method: 'POST',
-        body: JSON.stringify({ capabilities, node_shell: nodeShell }) })
+        body: JSON.stringify({ capabilities }) })
       setScript(r.script)
     } catch {
       setError('Could not generate the script. Try again.')

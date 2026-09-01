@@ -7,6 +7,7 @@ import { StatusPill } from './StatusPill'
 import { Skeleton, SkeletonLine, SkeletonMeterRow } from './ui/skeleton'
 import { CPU_GRADIENT, RAM_GRADIENT, STORAGE_GRADIENT, UsageBar } from './UsageBar'
 import { linkCls } from './ui/button'
+import { pveWebUrl } from '../lib/utils'
 
 /** The slice of GET /hosts this card needs: which endpoint answers for a node,
  *  and the address its "Open" shortcut points at. */
@@ -72,7 +73,7 @@ export function NodeCard({ node }: {
 
                rel="noopener": without it the opened page can steer this one
                through window.opener. */
-            <a href={webUrl} target="_blank" rel="noopener noreferrer"
+            <a href={pveWebUrl(webUrl)} target="_blank" rel="noopener noreferrer"
               aria-label={`Open the Proxmox web UI for ${node.node ?? node.name}`}
               title="Open Proxmox web UI"
               onClick={(e) => e.stopPropagation()}

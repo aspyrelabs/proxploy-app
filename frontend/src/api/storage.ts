@@ -77,6 +77,13 @@ export function useStorageContent(hostId: number | null, name: string | null,
   return useQuery({
     queryKey: ['storage', hostId, name, 'content', contentType],
     enabled: hostId != null && name != null,
+    // LiveProvider's contract is that query polling covers whatever SSE
+    // misses, and this list had no polling at all: with the stream down
+    // (a restart, a sleeping laptop, the reconnect backoff) a finished
+    // upload never appeared until the page was reloaded by hand. Matches
+    // useStorage's own cadence above, and only runs while a datastore
+    // panel is open.
+    refetchInterval: 60_000,
     queryFn: () => {
       const p = new URLSearchParams()
       if (contentType) p.set('content', contentType)
