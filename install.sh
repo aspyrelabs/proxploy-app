@@ -517,9 +517,13 @@ EOS
       esac ;;
   esac
 
-  command -v python3 >/dev/null 2>&1 || die \
-    "python3 is not installed, and Proxploy needs $PY_MIN_MAJOR.$PY_MIN_MINOR\
- or newer."
+  # No python3 yet is NOT a failure: step 1 below apt-installs it, and the
+  # platforms the case above accepted all ship 3.11 or newer. Refusing here
+  # turned a minimal Debian 12, which is what a fresh container or a stripped
+  # LXC template is, away from an installer that was about to install the very
+  # thing it complained was missing. Only an already-present python3 that is
+  # too old is worth refusing up front, which is what the probe below does.
+  command -v python3 >/dev/null 2>&1 || return 0
   # Asked of the interpreter rather than parsed out of --version: the string
   # format is not a promise and this is the number that actually decides.
   python3 - "$PY_MIN_MAJOR" "$PY_MIN_MINOR" <<'EOF' || die \
