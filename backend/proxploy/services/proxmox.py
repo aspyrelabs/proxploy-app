@@ -205,13 +205,27 @@ class _NamedUpload(io.BufferedReader):
     without renaming the spool file on disk.
     """
 
-    def __init__(self, raw, name: str):
+    def __init__(self, raw, name: str, on_progress=None):
         super().__init__(raw)
         self._upload_name = name
+        self._on_progress = on_progress
+        self._sent = 0
 
     @property
     def name(self):
         return self._upload_name
+
+    def _count(self, chunk):
+        if chunk and self._on_progress is not None:
+            self._sent += len(chunk)
+            self._on_progress(self._sent)
+        return chunk
+
+    def read(self, size=-1):
+        return self._count(super().read(size))
+
+    def read1(self, size=-1):
+        return self._count(super().read1(size))
 
 
 def _classify(exc: BaseException) -> str:
@@ -289,12 +303,13 @@ def routable_addresses(raw) -> list[str]:
 class ProxmoxClient:
     def __init__(self, address: str, token_id: str, token_secret: str,
                  verify_tls: bool = True, tls_fingerprint: str | None = None,
-                 factory=None):
+                 factory=None, timeout_s: float = 30.0):
         self.address = address
         self.token_id = token_id
         self.token_secret = token_secret
         self.verify_tls = verify_tls
         self.tls_fingerprint = tls_fingerprint
+        self.timeout_s = timeout_s
         self._factory = factory or default_factory
         self._api = None
 
@@ -370,7 +385,8 @@ class ProxmoxClient:
             self._api = self._factory(host=host, port=port, user=user,
                                       token_name=token_name,
                                       token_value=self.token_secret,
-                                      verify_ssl=self.verify_tls)
+                                      verify_ssl=self.verify_tls,
+                                      timeout=self.timeout_s)
         except Exception as e:
             raise self._wrap(f"cannot connect to {self.address}", e) from e
         return self._api
@@ -390,6 +406,14 @@ class ProxmoxClient:
             raise
         except Exception as e:
             raise self._wrap("permission read failed", e) from e
+
+    def role_privileges(self, roleid: str) -> set[str] | None:
+        try:
+            row = self._connect().access.roles(roleid).get()
+        except Exception:
+            return None
+        privs = (row or {}).get("privs") or ""
+        return {p for p in privs.split(",") if p}
 
     def cluster_resources(self) -> list[dict]:
         """One bulk call: every node/CT/VM/storage row for this endpoint.
@@ -1495,7 +1519,7 @@ class ProxmoxClient:
 
 
     def storage_upload(self, node: str, storage: str, content: str,
-                       filename: str, path: str) -> str:
+                       filename: str, path: str, on_progress=None) -> str:
         """POST /nodes/{node}/storage/{storage}/upload -> UPID.
 
         `path` is a spooled temp file on the Proxploy host, opened here and
@@ -1509,7 +1533,8 @@ class ProxmoxClient:
         which is what keeps proxmoxer's streaming-multipart path in play.
         """
         try:
-            with open(path, "rb", buffering=0) as raw, _NamedUpload(raw, filename) as fh:
+            with open(path, "rb", buffering=0) as raw, \
+                    _NamedUpload(raw, filename, on_progress) as fh:
                 return self._connect().nodes(node).storage(storage).upload.post(
                     content=content, filename=fh)
         except ProxmoxError:

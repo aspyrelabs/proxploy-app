@@ -37,17 +37,37 @@ def _resolve(app, host_id: int, node: str | None):
             raise JobFailed(str(e)) from e
 
 
+# Sending the bytes to the node is nearly all of the wall clock, and PVE's own
+# task afterwards only moves the finished file into place. The send owns the
+# bar up to here and await_task takes it from there, so the two never disagree
+# about which direction progress moves.
+UPLOAD_SEND_PCT = 90
+
+
 async def run_upload(ctx: JobContext, params: dict) -> dict:
     app = ctx.backend.app
     host_id = int(params["host_id"])
     storage, content = params["storage"], params["content"]
     filename, path = params["filename"], params["spool_path"]
     client, node = await asyncio.to_thread(_resolve, app, host_id, params.get("node"))
-    ctx.log(f"uploading {filename} ({params.get('size_bytes', 0)} bytes) "
-            f"to {storage} on {node}")
+    total = int(params.get("size_bytes") or 0)
+    ctx.log(f"uploading {filename} ({total} bytes) to {storage} on {node}")
+    loop = asyncio.get_running_loop()
+    reported = 0
+
+    def on_progress(sent: int) -> None:
+        nonlocal reported
+        if total <= 0:
+            return
+        pct = min(UPLOAD_SEND_PCT, sent * UPLOAD_SEND_PCT // total)
+        if pct > reported:
+            reported = pct
+            loop.call_soon_threadsafe(ctx.progress, pct)
+
     upid = await asyncio.to_thread(client.storage_upload, node, storage,
-                                   content, filename, path)
+                                   content, filename, path, on_progress)
     status = await await_task(ctx, client, node, upid,
+                              start_pct=UPLOAD_SEND_PCT,
                               timeout_s=app.state.settings.pve_task_timeout_s)
     app.state.bus.publish("resource", {"type": "storage", "id": host_id,
                                        "change": "content"})

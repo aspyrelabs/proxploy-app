@@ -28,7 +28,9 @@ def _host(db, name="h1"):
 class _FakeApp:
     def __init__(self, secretstore):
         from types import SimpleNamespace
-        self.state = SimpleNamespace(secretstore=secretstore, proxmox_factory=None)
+        from proxploy.config import Settings
+        self.state = SimpleNamespace(secretstore=secretstore, proxmox_factory=None,
+                                     settings=Settings())
 
 
 def _secretstore(tmp_path):

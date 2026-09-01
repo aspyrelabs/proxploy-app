@@ -48,7 +48,8 @@ def client_for_host(app, db, host: Host, capability: str = "monitoring") -> Prox
     return ProxmoxClient(host.address, tok["token_id"], tok["token_secret"],
                          verify_tls=host.verify_tls,
                          tls_fingerprint=host.tls_fingerprint,
-                         factory=app.state.proxmox_factory)
+                         factory=app.state.proxmox_factory,
+                         timeout_s=app.state.settings.pve_api_timeout_s)
 
 
 def cluster_scope(host: Host) -> tuple:
@@ -145,6 +146,11 @@ def capability_gaps(app, db, host) -> dict[str, list[str] | None]:
         if missing:
             gaps[key] = missing
     return gaps
+
+
+def privilege_repair_plan(app, db, host) -> dict[str, list[str] | None]:
+    gaps = capability_gaps(app, db, host)
+    return {CAPABILITIES[key].role: missing for key, missing in gaps.items()}
 
 
 def cluster_quorate(rows: list[dict]) -> bool | None:

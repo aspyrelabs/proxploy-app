@@ -34,6 +34,13 @@ class Capability:
 
 # Order matters: it is the order the script emits, and monitoring first is
 # what makes a half-read script still a working one.
+# Sys.Console is what PVE checks for a node shell. It rides the Console role so
+# onboarding grants every privilege Proxploy needs in one pass: a second, later
+# grant run by hand on the node is the failure this product must not have.
+# Whether a host may open a node shell at all stays an in-app decision,
+# hosts.node_shell_enabled, which is a gate on the feature and not on the token.
+NODE_SHELL_PRIVILEGE = "Sys.Console"
+
 CAPABILITIES: dict[str, Capability] = {
     "monitoring": Capability(
         key="monitoring", label="Read-only monitoring", role="ProxployAudit",
@@ -67,6 +74,28 @@ CAPABILITIES: dict[str, Capability] = {
                     # token was pasted -- confirmed the same class of gap
                     # as Sys.PowerMgmt (see node-power-privilege-report.md).
                     "Sys.Modify", "Datastore.Allocate", "Datastore.AllocateSpace",
+                    # PVE gates POST /nodes/{node}/storage/{storage}/upload on
+                    # Datastore.AllocateTemplate, which none of the four roles
+                    # carried, so uploading an ISO or a CT template could never
+                    # work with any token Proxploy generated. It reached the
+                    # operator as "Connection aborted, RemoteDisconnected"
+                    # rather than as a 403: PVE refuses and closes while the
+                    # client is still sending the body, so on anything larger
+                    # than a few KiB the real answer is never read.
+                    "Datastore.AllocateTemplate",
+                    # The create wizard can put a new guest straight into a
+                    # resource pool, and PVE checks this on /pool/{poolid} for
+                    # a create carrying `pool=`. Nothing granted it, so that
+                    # field 403'd for anyone whose cluster actually defines a
+                    # pool.
+                    "Pool.Allocate",
+                    # Attaching an install ISO at create was measured as not
+                    # needing this, and that is still true. It is granted for
+                    # the writes that come after: changing or ejecting the
+                    # media on an existing guest is VM.Config.CDROM, and the
+                    # role a guest is edited through must carry it or the edit
+                    # fails at the point of use rather than at onboarding.
+                    "VM.Config.CDROM",
                     # PVE 9 puts every bridge behind an SDN ACL
                     # (/sdn/zones/localnetwork/vmbr0), so attaching a guest NIC
                     # to a bridge checks SDN.Use. Nothing here granted it, and
@@ -92,8 +121,8 @@ CAPABILITIES: dict[str, Capability] = {
             "config (bridges, storage pools, storage content)."),
     "console": Capability(
         key="console", label="Console", role="ProxployConsole", token="console",
-        privileges=("VM.Console",),
-        why="Console tickets for containers and VMs."),
+        privileges=("VM.Console", NODE_SHELL_PRIVILEGE),
+        why="Console tickets for containers and VMs, and the node shell."),
     "backup": Capability(
         key="backup", label="Backup", role="ProxployBackup", token="backup",
         privileges=("VM.Backup", "Datastore.AllocateSpace", "Datastore.Audit"),
@@ -105,10 +134,6 @@ CAPABILITIES: dict[str, Capability] = {
             "backup also needs the Lifecycle capability, because it creates "
             "the guest."),
 }
-
-# Sys.Console is effectively root on the node, so it is never folded into the
-# console capability: it is a separate, explicit opt-in (doc 08 §2 and §9).
-NODE_SHELL_PRIVILEGE = "Sys.Console"
 
 # Sys.PowerMgmt is the ability to reboot or power off the HOST, which can
 # strand every guest it runs and can strand Proxploy itself when it runs on
@@ -163,14 +188,26 @@ _HEADER = """\
 """
 
 
-def _privileges_for(cap: Capability, node_shell: bool) -> tuple[str, ...]:
-    if cap.key == "console" and node_shell:
-        return cap.privileges + (NODE_SHELL_PRIVILEGE,)
-    return cap.privileges
+def merge_role_privs(existing, wanted) -> tuple[str, ...]:
+    return tuple(sorted(set(existing) | set(wanted)))
 
 
-def generate_script(capabilities: list[str], *, path: str = "/",
-                    node_shell: bool = False) -> str:
+def repair_commands(plan: dict[str, list[str] | None],
+                    existing_by_role: dict[str, set[str] | None]) -> list[str]:
+    commands = []
+    for role in sorted(plan):
+        missing = plan[role]
+        if not missing:
+            continue
+        existing = existing_by_role.get(role)
+        if existing is None:
+            continue
+        union = merge_role_privs(existing, missing)
+        commands.append(f"pveum role modify {role} -privs '{','.join(union)}'")
+    return commands
+
+
+def generate_script(capabilities: list[str], *, path: str = "/") -> str:
     """Return the script for `capabilities`, monitoring always included.
 
     `path` is where the ACLs are granted. "/" is the default because Proxploy
@@ -191,7 +228,7 @@ def generate_script(capabilities: list[str], *, path: str = "/",
              f"pveum user add {PVE_USER} --comment 'Proxploy'", ""]
 
     for cap in chosen:
-        privs = ",".join(_privileges_for(cap, node_shell))
+        privs = ",".join(cap.privileges)
         token_id = f"{PVE_USER}!{cap.token}"
         lines += [
             f"# {cap.label}: {cap.why}",

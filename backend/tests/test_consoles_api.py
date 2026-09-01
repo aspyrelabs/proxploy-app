@@ -159,9 +159,14 @@ def test_shell_ticket_requires_node_shell_enabled(tmp_path, csrf_header, bootstr
     with TestClient(app) as client:
         bootstrap_admin(client)
         with app.state.sessionmaker() as db:
-            host = seed_host_row(db)  # node_shell_enabled defaults False
+            host = seed_host_row(db)
             host_id = host.id
         _seed_credential(app, host)
+        # Node shell is on by default now, so the refusal this test is about
+        # only happens once an operator has deliberately turned it off.
+        r = client.patch(f"/api/v1/hosts/{host_id}", json={"node_shell_enabled": False},
+                         headers=csrf_header(client))
+        assert r.status_code == 200 and r.json()["node_shell_enabled"] is False
 
         r = client.post(f"/api/v1/hosts/{host_id}/shell/tickets", headers=csrf_header(client))
         assert r.status_code == 409

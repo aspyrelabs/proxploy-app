@@ -41,9 +41,31 @@ class _PermissionsLeaf:
         return self._value
 
 
+class _RoleLeaf:
+    def __init__(self, owner, roleid):
+        self._owner, self._roleid = owner, roleid
+
+    def get(self, **kwargs):
+        if self._owner.fail or self._roleid in self._owner.role_read_fail:
+            raise ConnectionError("fake PVE refused to read role")
+        privs = self._owner.roles_by_id.get(self._roleid)
+        if privs is None:
+            raise ConnectionError(f"fake PVE has no role {self._roleid}")
+        return {"privs": privs}
+
+
+class _RolesFactory:
+    def __init__(self, owner):
+        self._owner = owner
+
+    def __call__(self, roleid):
+        return _RoleLeaf(self._owner, roleid)
+
+
 class _Access:
     def __init__(self, owner, permissions, fail):
         self.permissions = _PermissionsLeaf(owner, permissions, fail)
+        self.roles = _RolesFactory(owner)
 
 
 class _AttrLeaf:
@@ -855,6 +877,8 @@ class FakePVE:
         self.version = _Leaf(version or {"version": "8.4.1", "release": "8.4"}, fail)
         self.permissions_fail = False
         self.access = _Access(self, permissions or {}, fail)
+        self.roles_by_id: dict[str, str] = {}
+        self.role_read_fail: set[str] = set()
         # infra reads (Phase 6): set before the namespaces below, which read
         # them lazily so a test can reassign any of these post-construction
         # Set to a PVE error sentence to make a guest ACTION (start/stop/...)

@@ -206,7 +206,7 @@ VM_DISK_REFRESH_INTERVAL_S = 900
 
 
 def _refresh_vm_disk(v: Vm, g: dict, client, checked: dict[int, datetime],
-                     now: datetime) -> None:
+                     now: datetime, skip_probe: bool = False) -> None:
     """Keep `v.disk_bytes` (USED bytes) and `v.guest_agent_ok` current.
 
     Both come out of ONE get-fsinfo call, because whether the agent answered is
@@ -237,6 +237,8 @@ def _refresh_vm_disk(v: Vm, g: dict, client, checked: dict[int, datetime],
         v.guest_agent_ok = None
         return
     if client is None:
+        return
+    if skip_probe:
         return
     last = checked.get(v.id)
     # The cadence gate is skipped while the verdict is unknown, mirroring what
@@ -711,6 +713,7 @@ def ingest_cycle(db, host: Host, resources: list[dict],
 
     existing = {v.vmid: v for v in db.query(Vm).filter_by(host_id=host.id).all()}
     seen: set[int] = set()
+    new_vmids: set[int] = set()
     membership_changed = False
     for (kind, vmid), g in guests.items():
         if kind != "qemu":
@@ -723,6 +726,7 @@ def ingest_cycle(db, host: Host, resources: list[dict],
                    template=g["template"])
             db.add(v)
             membership_changed = True
+            new_vmids.add(vmid)
         elif v.status != g["status"] and ("vm", v.id) not in fresh:
             events.append(("resource", {"type": "vm", "id": v.id,
                                         "change": "status", "status": g["status"]}))
@@ -774,7 +778,7 @@ def ingest_cycle(db, host: Host, resources: list[dict],
         # After the flush, not up in the upsert loop above: this one is keyed
         # on the VM's DB id and a row inserted this cycle does not have one
         # yet, so every new VM would share the key None.
-        _refresh_vm_disk(v, g, client, fs_checked, now)
+        _refresh_vm_disk(v, g, client, fs_checked, now, skip_probe=v.vmid in new_vmids)
         # Asks once per VM ever, not on a timer. See _refresh_os_type.
         _refresh_os_type(v, g, client)
         samples.append(MetricSample(target_type="vm", target_id=v.id,
@@ -1037,7 +1041,8 @@ class Poller:
             client = ProxmoxClient(host.address, tok["token_id"], tok["token_secret"],
                                   verify_tls=host.verify_tls,
                                   tls_fingerprint=host.tls_fingerprint,
-                                  factory=app.state.proxmox_factory)
+                                  factory=app.state.proxmox_factory,
+                                  timeout_s=app.state.settings.pve_api_timeout_s)
             resources = client.cluster_resources()
             node_names = [r["node"] for r in resources if r.get("type") == "node"]
             # Metrics are the optional half of a cycle. On real hardware a

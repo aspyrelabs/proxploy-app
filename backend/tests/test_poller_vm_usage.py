@@ -139,11 +139,25 @@ def test_two_cycles_make_a_rate(tmp_path):
     assert v.net_out_bps_cached == 20.0
 
 
+def test_a_newly_discovered_vm_is_not_probed_until_the_cycle_after(tmp_path):
+    db, host, now = _seed(tmp_path)
+    client = FakeClient()
+
+    _cycle(db, host, now, client=client)
+    assert client.calls == []
+    assert _vm(db, host).guest_agent_ok is None
+
+    _cycle(db, host, now + timedelta(seconds=30), client=client)
+    assert client.calls == [("pve1", 100)]
+    assert _vm(db, host).disk_bytes == 12_884_901_888
+
+
 def test_the_guest_agent_fills_in_used_disk(tmp_path):
     db, host, now = _seed(tmp_path)
     client = FakeClient()
 
     _cycle(db, host, now, client=client)
+    _cycle(db, host, now + timedelta(seconds=30), client=client)
 
     v = _vm(db, host)
     assert v.disk_bytes == 12_884_901_888
@@ -158,7 +172,8 @@ def test_a_vm_without_the_guest_agent_stays_null_and_is_not_an_error(tmp_path):
     db, host, now = _seed(tmp_path)
     client = FakeClient(answer=(False, None))
 
-    res = _cycle(db, host, now, client=client)
+    _cycle(db, host, now, client=client)
+    res = _cycle(db, host, now + timedelta(seconds=30), client=client)
 
     v = _vm(db, host)
     assert v.disk_bytes is None
@@ -177,9 +192,10 @@ def test_a_stopped_vm_is_never_asked(tmp_path):
     checked = {}
 
     _cycle(db, host, now, client=client, checked=checked)
+    _cycle(db, host, now + timedelta(seconds=30), client=client, checked=checked)
     assert _vm(db, host).disk_bytes == 12_884_901_888
 
-    _cycle(db, host, now + timedelta(seconds=30), client=client,
+    _cycle(db, host, now + timedelta(seconds=60), client=client,
            checked=checked, status="stopped")
 
     assert _vm(db, host).disk_bytes is None
@@ -204,7 +220,7 @@ def test_used_disk_is_not_re_read_every_cycle(tmp_path):
                checked=checked)
     assert len(client.calls) == 1
 
-    _cycle(db, host, now + timedelta(seconds=VM_DISK_REFRESH_INTERVAL_S + 1),
+    _cycle(db, host, now + timedelta(seconds=30 + VM_DISK_REFRESH_INTERVAL_S + 1),
            client=client, checked=checked)
     assert len(client.calls) == 2
 
@@ -305,6 +321,7 @@ def test_the_agent_verdict_is_recorded_when_it_answers(tmp_path):
     client = FakeClient()
 
     _cycle(db, host, now, client=client)
+    _cycle(db, host, now + timedelta(seconds=30), client=client)
 
     v = _vm(db, host)
     assert v.guest_agent_ok is True
@@ -321,6 +338,7 @@ def test_no_agent_configured_is_recorded_as_false_not_unknown(tmp_path):
     client = FakeClient(answer=(False, None))
 
     _cycle(db, host, now, client=client)
+    _cycle(db, host, now + timedelta(seconds=30), client=client)
 
     v = _vm(db, host)
     assert v.guest_agent_ok is False
@@ -336,6 +354,7 @@ def test_an_agent_that_answers_nothing_usable_is_still_installed(tmp_path):
     client = FakeClient(answer=(True, None))
 
     _cycle(db, host, now, client=client)
+    _cycle(db, host, now + timedelta(seconds=30), client=client)
 
     v = _vm(db, host)
     assert v.guest_agent_ok is True
@@ -351,9 +370,10 @@ def test_a_stopped_vm_is_unknown_not_uninstalled(tmp_path):
     checked = {}
 
     _cycle(db, host, now, client=client, checked=checked)
+    _cycle(db, host, now + timedelta(seconds=30), client=client, checked=checked)
     assert _vm(db, host).guest_agent_ok is True
 
-    _cycle(db, host, now + timedelta(seconds=30), client=client,
+    _cycle(db, host, now + timedelta(seconds=60), client=client,
            checked=checked, status="stopped")
 
     assert _vm(db, host).guest_agent_ok is None
@@ -375,7 +395,7 @@ def test_a_known_verdict_is_not_re_asked_every_cycle(tmp_path):
     assert len(client.calls) == 1
     assert _vm(db, host).guest_agent_ok is False
 
-    _cycle(db, host, now + timedelta(seconds=VM_DISK_REFRESH_INTERVAL_S + 1),
+    _cycle(db, host, now + timedelta(seconds=30 + VM_DISK_REFRESH_INTERVAL_S + 1),
            client=client, checked=checked)
     assert len(client.calls) == 2
 
@@ -390,7 +410,7 @@ def test_an_unknown_verdict_is_retried_on_the_next_cycle(tmp_path):
     client = FakeClient(answer=(None, None))
     checked = {}
 
-    for i in range(3):
+    for i in range(4):
         _cycle(db, host, now + timedelta(seconds=30 * i), client=client,
                checked=checked)
 
@@ -399,8 +419,8 @@ def test_an_unknown_verdict_is_retried_on_the_next_cycle(tmp_path):
 
     # And the moment PVE answers, it settles and stops being asked.
     client.answer = (False, None)
-    _cycle(db, host, now + timedelta(seconds=90), client=client, checked=checked)
     _cycle(db, host, now + timedelta(seconds=120), client=client, checked=checked)
+    _cycle(db, host, now + timedelta(seconds=150), client=client, checked=checked)
     assert len(client.calls) == 4
     assert _vm(db, host).guest_agent_ok is False
 
@@ -414,9 +434,10 @@ def test_a_probe_that_could_not_be_made_keeps_the_last_verdict(tmp_path):
     checked = {}
 
     _cycle(db, host, now, client=client, checked=checked)
+    _cycle(db, host, now + timedelta(seconds=30), client=client, checked=checked)
     assert _vm(db, host).guest_agent_ok is False
 
     client.answer = (None, None)
-    _cycle(db, host, now + timedelta(seconds=901), client=client, checked=checked)
+    _cycle(db, host, now + timedelta(seconds=931), client=client, checked=checked)
 
     assert _vm(db, host).guest_agent_ok is False

@@ -1,4 +1,5 @@
 import http.client
+import logging
 import shutil
 from contextlib import asynccontextmanager
 from datetime import timedelta
@@ -16,6 +17,8 @@ from proxploy import __version__
 from proxploy.config import Settings, get_settings
 from proxploy.db import make_engine, make_sessionmaker, run_migrations
 from proxploy.models import AppSetting, utcnow
+
+logger = logging.getLogger(__name__)
 
 
 def _init_reporting(settings: Settings) -> str:
@@ -158,6 +161,29 @@ def create_app(
 
         app.state.jobs = JobBackend(app)
         app.state.jobs.sweep_orphans()  # doc 02 §3: mark orphans, never resume
+
+        # Off the boot path on purpose, never awaited here. Every host costs
+        # several PVE round trips plus an SSH connection, and packaging/
+        # proxploy-update health-checks the new release right after it
+        # switches: a slow boot would fail that check and roll back the very
+        # upgrade this repair exists to complete.
+        async def _repair_privileges_at_boot():
+            from proxploy.models import Host
+            from proxploy.services.privrepair import repair_host_privileges
+
+            with app.state.sessionmaker() as db:
+                host_ids = [h.id for h in db.query(Host).all()]
+            for host_id in host_ids:
+                try:
+                    with app.state.sessionmaker() as db:
+                        host = db.get(Host, host_id)
+                        if host is not None:
+                            await repair_host_privileges(app, db, host,
+                                                         actor_type="system")
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    logger.exception("privilege repair failed for host %s", host_id)
         # A spooled upload belongs to a job sweep_orphans just marked
         # `interrupted` above: this runner never resumes a job across a
         # restart: so anything left in the upload spool dir at boot is
@@ -167,6 +193,7 @@ def create_app(
         app.state.poller = Poller(app)
         app.state.scheduler = Scheduler(app)
         poller_task = scheduler_task = None
+        repair_task = asyncio.create_task(_repair_privileges_at_boot())
         if settings.alerts_enabled:
             # Evaluation rides the poll loop (pollers/__init__.py), so the rules
             # are seeded on the same flag, matching how the scheduler seeds its
@@ -199,6 +226,7 @@ def create_app(
         refresh_task = getattr(app.state, "refresh_task", None)
         if refresh_task:
             refresh_task.cancel()
+        repair_task.cancel()
         if poller_task:
             poller_task.cancel()
         if scheduler_task:

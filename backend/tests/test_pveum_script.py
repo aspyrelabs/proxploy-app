@@ -105,15 +105,16 @@ def test_lifecycle_carries_node_infrastructure_privileges_too():
         assert priv in s, priv
 
 
-def test_console_withholds_sys_console_unless_node_shells_are_opted_into():
-    without = generate_script(["console"])
-    assert "VM.Console" in without
-    # Sys.Console is effectively root on the node, so it is a separate opt-in
-    # (doc 08 §2, and §9's own note on node shells).
-    assert "Sys.Console" not in without
-
-    with_shell = generate_script(["console"], node_shell=True)
-    assert "Sys.Console" in with_shell
+def test_console_always_grants_sys_console_so_onboarding_is_the_only_step():
+    """Sys.Console used to ride a separate opt-in, and the flag reaching the
+    generator was wired to the App Store SSH consent box rather than to
+    anything about node shells. An operator could therefore finish onboarding,
+    turn the node shell on in Proxploy, and get a 403 that only a hand-run
+    pveum command on the node could fix. Every privilege Proxploy needs is
+    granted by the onboarding script now."""
+    s = generate_script(["console"])
+    assert "VM.Console" in s
+    assert "Sys.Console" in s
 
 
 def test_every_token_is_privilege_separated_and_gets_its_own_acl():
@@ -208,7 +209,7 @@ def test_console_role_converges_to_add_sys_console_on_a_rerun():
     an already-existing ProxployConsole role to include Sys.Console, not
     silently leave it at VM.Console only."""
     role = CAPABILITIES["console"].role
-    s = generate_script(["console"], node_shell=True)
+    s = generate_script(["console"])
     assert f"pveum role add {role} -privs 'VM.Console,Sys.Console' 2>/dev/null || " \
            f"pveum role modify {role} -privs 'VM.Console,Sys.Console'" in s
 
@@ -234,3 +235,16 @@ def test_script_explains_a_token_add_failure_is_expected_and_safe():
     lowered = s.lower()
     assert "already exists" in lowered
     assert "still valid" in lowered or "still works" in lowered
+
+
+def test_the_gap_probe_and_the_script_read_the_same_privilege_list():
+    """capability_gaps() reports what a token is missing by walking
+    cap.privileges, and the script grants cap.privileges. A privilege that
+    lived outside that tuple was invisible to the probe, so a console token
+    with no Sys.Console reported a clean host and the node shell button 403'd
+    anyway. Keeping both on one list is what stops them disagreeing again."""
+    for cap in CAPABILITIES.values():
+        s = generate_script([cap.key])
+        for priv in cap.privileges:
+            assert priv in s, f"{cap.key} grants {priv} but the script omits it"
+    assert "Sys.Console" in CAPABILITIES["console"].privileges

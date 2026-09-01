@@ -185,7 +185,7 @@ class Host(TimestampMixin, Base):
     pve_version: Mapped[str | None] = mapped_column(Text)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime)
     ssh_host_key_fingerprint: Mapped[str | None] = mapped_column(Text)
-    node_shell_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    node_shell_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     # Whether the stored token lacks Sys.PowerMgmt (host reboot/power off),
     # recomputed at enrolment and by POST /hosts/{id}/test, same idiom as
     # last_error above. NULL means "not checked yet", distinct from False

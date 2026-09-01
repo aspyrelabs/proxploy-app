@@ -316,3 +316,26 @@ def test_node_power_leaves_an_unrelated_failure_generically_classified():
         _fake_client(fake).node_power("pve1", "shutdown")
     assert "Sys.PowerMgmt" not in str(ei.value)
     assert ei.value.kind != "permission"
+
+
+def test_an_explicit_api_timeout_is_always_sent_to_proxmoxer():
+    """proxmoxer defaults to 5 seconds on every call when the caller sends no
+    timeout, and nothing here sent one. That is fine for the small reads and
+    wrong for the rest: listing an NFS datastore's contents on real hardware
+    came back as "Read timed out (read timeout=5)", which reads like a dead
+    node rather than a slow one. The default has to be ours, not the
+    library's, so a change to proxmoxer cannot silently move it."""
+    from proxploy.services.proxmox import ProxmoxClient
+    from tests.fakes.pve import FakePVE, make_fake_factory
+
+    fake = FakePVE(version={"release": "9.0"})
+    c = ProxmoxClient("https://10.0.0.5:8006", "proxploy@pve!mon", "s3cret",
+                      factory=make_fake_factory(fake))
+    c.version()
+    assert fake.kwargs["timeout"] == 30.0
+
+    fake2 = FakePVE(version={"release": "9.0"})
+    c2 = ProxmoxClient("https://10.0.0.5:8006", "proxploy@pve!mon", "s3cret",
+                       factory=make_fake_factory(fake2), timeout_s=120.0)
+    c2.version()
+    assert fake2.kwargs["timeout"] == 120.0

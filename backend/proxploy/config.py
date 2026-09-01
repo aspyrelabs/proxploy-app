@@ -103,6 +103,12 @@ class Settings(BaseSettings):
     # 3600s (1h), not lifecycle's 300s: these are disk-copy-bound (vm.clone,
     # backup.run/restore/prune, storage.upload), so multi-hundred-GB clones
     # need far more than five minutes.
+    # proxmoxer's own default is 5 seconds, applied to every call Proxploy
+    # makes. That is fine for the small reads and wrong for everything else: a
+    # directory listing on a busy NFS datastore blew past it and came back as
+    # "Read timed out", which reads like a dead node rather than a slow one.
+    # Passed explicitly at ProxmoxClient._connect so the default is ours.
+    pve_api_timeout_s: float = 30.0
     pve_task_timeout_s: float = 3600.0
     backup_sync_stale_s: float = 900.0
     # The scheduler tick is the resolution floor: a cron expression cannot be

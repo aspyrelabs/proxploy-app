@@ -25,6 +25,7 @@ REQUIRES: dict[str, frozenset[str]] = {
     "node_dns": AUDIT, "node_time": AUDIT, "node_networks": AUDIT,
     "node_tasks": AUDIT, "task_status": AUDIT, "task_log": AUDIT,
     "storages": AUDIT, "storage_status": AUDIT, "storage_content": AUDIT,
+    "role_privileges": AUDIT,
     "guest_status": AUDIT, "guest_config": AUDIT, "guest_pending": AUDIT,
     "snapshots": AUDIT, "lxc_interfaces": AUDIT,
     "firewall_rules": AUDIT, "firewall_rule": AUDIT, "firewall_options": AUDIT,

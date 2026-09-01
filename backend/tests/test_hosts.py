@@ -706,3 +706,19 @@ def test_a_failed_ssh_enrolment_leaves_no_half_built_host(pve_client, csrf_heade
     r = c.get("/api/v1/hosts")
     assert r.status_code == 200, r.text
     assert r.json() == [] or r.json() == {"items": []}
+
+
+def test_node_shell_is_enabled_by_default_and_can_be_turned_off(pve_client, csrf_header):
+    """Sys.Console rides the Console role now, so the privilege is always
+    granted by onboarding and the toggle is the only thing left deciding
+    whether a host may open a node shell. Defaulting it off made a granted
+    privilege look broken, so a new host arrives with it on and an operator
+    who does not want it turns it off."""
+    c, _ = pve_client
+    hid = c.post("/api/v1/hosts", json=HOST, headers=csrf_header(c)).json()["id"]
+
+    assert c.get(f"/api/v1/hosts/{hid}").json()["node_shell_enabled"] is True
+
+    r = c.patch(f"/api/v1/hosts/{hid}", json={"node_shell_enabled": False},
+                headers=csrf_header(c))
+    assert r.status_code == 200 and r.json()["node_shell_enabled"] is False

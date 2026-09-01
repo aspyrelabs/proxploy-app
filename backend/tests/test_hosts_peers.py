@@ -482,7 +482,7 @@ def test_a_peer_already_in_proxploy_is_skipped_and_nothing_is_written(
         assert (db.query(Host).count(), db.query(HostCredential).count()) == before
 
 
-def test_no_ssh_key_is_copied_and_consent_and_node_shell_are_not_inherited(
+def test_no_ssh_key_is_copied_and_install_consent_is_not_inherited(
         peers_app, csrf_header):
     """The SSH key is a root shell on the node, a different trust decision
     from an API token, and that separation is why this feature exists."""
@@ -500,7 +500,13 @@ def test_no_ssh_key_is_copied_and_consent_and_node_shell_are_not_inherited(
     _enrol(c, csrf_header, host_id, ["pve2"])
     with c.app.state.sessionmaker() as db:
         peer = db.query(Host).filter_by(name="pve2").one()
-        assert peer.node_shell_enabled is False
+        # Node shell is on for every host now, a peer included: the privilege
+        # rides the Console role from onboarding, so leaving it off here only
+        # produced a console that refused to open on a node the operator can
+        # already reach. The two things this test exists to protect are below
+        # and are unchanged, because they are the actual trust boundary: a root
+        # SSH key is never copied, and install consent is never inherited.
+        assert peer.node_shell_enabled is True
         assert peer.install_consent_at is None
         assert [cr.kind for cr in
                 db.query(HostCredential).filter_by(host_id=peer.id)] == [

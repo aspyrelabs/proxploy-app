@@ -15,7 +15,11 @@ from proxploy.services.proxmox import (ProxmoxClient, ProxmoxError, parse_token_
                                        tls_fingerprint_sha256, token_public_meta)
 from proxploy.services.hostclient import (capability_gaps, client_for_host,
                                           cluster_identity, cluster_quorate,
-                                          granted_privileges)
+                                          granted_privileges, privilege_repair_plan)
+from proxploy.services.privrepair import (PrivilegeRepairRefused,
+                                          existing_role_privileges,
+                                          repair_host_privileges)
+from proxploy.services.pveum import repair_commands
 from proxploy.services.selfguard import is_self_host_node
 from proxploy.services.sshkeys import generate_ed25519
 
@@ -218,7 +222,6 @@ class TokenScriptIn(BaseModel):
     generator, so omitting it here is not a way to opt out of it."""
     capabilities: list[str] = []
     path: str = "/"
-    node_shell: bool = False
 
 
 @router.post("/token-script")
@@ -230,8 +233,7 @@ def token_script(body: TokenScriptIn, user: User = Depends(_manage_global)):
     Proxploy never asks for root credentials, even transiently.
     """
     try:
-        script = generate_script(body.capabilities, path=body.path,
-                                 node_shell=body.node_shell)
+        script = generate_script(body.capabilities, path=body.path)
     except ValueError as e:
         raise HTTPException(422, str(e)) from e
     return {"script": script,
@@ -698,6 +700,37 @@ async def verify_ssh(host_id: int, request: Request, db=Depends(get_db),
                 ip=request.client.host if request.client else None)
     return {"verified": True, "verified_at": to_iso(cred.ssh_verified_at)}
 
+
+@router.get("/{host_id}/privileges")
+def host_privileges(host_id: int, request: Request, db=Depends(get_db),
+                    user: User = Depends(_manage)):
+    host = db.get(Host, host_id)
+    if not host:
+        raise HTTPException(404, "no such host")
+    plan = privilege_repair_plan(request.app, db, host)
+    existing = existing_role_privileges(request.app, db, host, plan)
+    commands = repair_commands(plan, existing)
+    has_key = db.query(HostCredential).filter_by(
+        host_id=host.id, kind="ssh_key").one_or_none() is not None
+    return {"host_id": host.id, "missing": plan,
+            "can_auto_repair": has_key, "commands": commands}
+
+
+@router.post("/{host_id}/privileges/repair")
+async def repair_privileges(host_id: int, request: Request, db=Depends(get_db),
+                            user: User = Depends(_manage)):
+    host = db.get(Host, host_id)
+    if not host:
+        raise HTTPException(404, "no such host")
+    try:
+        repaired = await repair_host_privileges(
+            request.app, db, host, actor_type="user", actor_id=user.id)
+    except PrivilegeRepairRefused as e:
+        raise HTTPException(409, {"error": "no_ssh_key", "commands": e.commands,
+                                  "detail": str(e)})
+    except ProxmoxError as e:
+        raise HTTPException(502, {"error": e.kind, "detail": str(e)})
+    return {"repaired": repaired, "method": "ssh" if repaired else "none"}
 
 
 _sync = authorize("host", "sync", scope_of=scope_host())
