@@ -68,4 +68,11 @@ docker exec "$name" bash -c "sqlite3 /var/lib/proxploy/proxploy.db \
 docker exec "$name" curl -fsSk https://127.0.0.1/ | grep -q 'id="root"' \
   || { echo "FAIL: TLS front does not serve the SPA at / after rollback"; exit 1; }
 echo "OK: poisoned 1.0.2 rejected, rolled back to 1.0.1, app healthy, SPA serves"
+
+# The failing update above must leave a TERMINAL status behind for 1.0.2, not
+# "running" forever: that status file is Settings > Updates' only way to know
+# the update ended, since the process that ran it is long gone by now.
+docker exec "$name" cat /var/lib/proxploy/updates/1.0.2.status | grep -q '"state": "rolled_back"' \
+  || { echo "FAIL: 1.0.2.status was not left in a terminal state"; exit 1; }
+echo "OK: the failed update's status file is terminal, not stuck on running"
 echo "PASS: upgrade + rollback harness"

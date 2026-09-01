@@ -8,7 +8,7 @@ from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
 import proxploy
 from proxploy.config import Settings
-from proxploy.services.updater import CAN_SELF_APPLY, check, detect_shape
+from proxploy.services.updater import CAN_SELF_APPLY, check, detect_shape, launch
 
 
 def _channel(tmp_path, version, schema=1, sign_with=None):
@@ -90,3 +90,12 @@ def test_shape_detection(tmp_path, monkeypatch):
 
 def test_only_lxc_and_systemd_may_self_apply():
     assert CAN_SELF_APPLY == {"lxc", "systemd"}
+
+
+def test_launch_writes_the_version_to_the_request_file_and_nothing_else(tmp_path):
+    request_file = tmp_path / "update-request"
+    s = Settings(db_url=f"sqlite:///{tmp_path}/t.db", data_dir=tmp_path,
+                master_key_file=tmp_path / "m.key",
+                update_request_file=request_file)
+    launch(s, "1.2.0")
+    assert request_file.read_text() == "1.2.0"

@@ -1,0 +1,12 @@
+[Unit]
+Description=Watch for a Proxploy self-update request
+
+[Path]
+# PathModified, not PathExists: a rewrite of the request file with the exact
+# same version (a retry after a channel blip) must still fire, and
+# PathExists only fires when the file's existence changes.
+PathModified=/var/lib/proxploy/update-request
+Unit=proxploy-update.service
+
+[Install]
+WantedBy=multi-user.target

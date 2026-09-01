@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# Root half of self-update. Triggered by proxploy-update.service, itself
+# triggered by proxploy-update.path watching the request file the app
+# writes. The request carries a VERSION ONLY, never a channel: that is the
+# one thing the proxploy user (User=proxploy on proxploy.service) is allowed
+# to ask for. This script, root owned and not writable by that user, is what
+# decides which channel a version comes from, so a compromised app process
+# can never hand a root process a server of its own choosing.
+set -euo pipefail
+
+# shellcheck source=lib/common.sh
+. "$(dirname "$0")/../lib/common.sh" 2>/dev/null || . /opt/proxploy/lib/common.sh
+need_root
+
+REQUEST_FILE="$PP_DATA/update-request"
+UPDATE_LOG_DIR="$PP_DATA/updates"
+mkdir -p "$UPDATE_LOG_DIR"
+
+INSTALLED=$(basename "$(readlink -f "$PP_CURRENT")" 2>/dev/null || echo unknown)
+
+# refuse <reason> [raw]: same status shape proxploy-update writes to
+# $PP_DATA/updates/*.status, so services/updater.py::read_log surfaces this
+# exactly like any other terminal state, and the UI never sits on "running"
+# for a request that was never going to run. No log file to point at: the
+# real updater never started.
+refuse() {
+  local reason="$1" raw="${2:-}" esc_reason esc_raw status_file
+  esc_reason=$(printf '%s' "$reason" | sed 's/\\/\\\\/g; s/"/\\"/g')
+  esc_raw=$(printf '%s' "$raw" | sed 's/\\/\\\\/g; s/"/\\"/g')
+  status_file="$UPDATE_LOG_DIR/invalid-request.status"
+  printf '{"state": "failed", "version": "%s", "from": "%s", "updated_at": "%s", "reason": "%s"}\n' \
+    "$esc_raw" "$INSTALLED" "$(date -u +%FT%TZ)" "$esc_reason" > "$status_file"
+  chown "$PP_USER:$PP_USER" "$UPDATE_LOG_DIR" "$status_file"
+  log "refused update request: $reason"
+  exit 0
+}
+
+[ -f "$REQUEST_FILE" ] || { log "no update request pending"; exit 0; }
+RAW=$(cat "$REQUEST_FILE" 2>/dev/null || true)
+rm -f "$REQUEST_FILE"
+
+VERSION=$(printf '%s' "$RAW" | tr -d '[:space:]')
+[[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+  || refuse "malformed version in update request" "$VERSION"
+
+# Channel is derived here, from the INSTALLED version, never taken from the
+# request: that is the whole point of this file existing. sort -V, not a
+# string compare, or 1.10.0 would sort below 1.2.0 and land on the dev
+# channel it long since moved off of.
+lowest=$(printf '%s\n%s\n' "$INSTALLED" "1.2.0" | sort -V | head -1)
+if [ "$lowest" = "1.2.0" ]; then
+  CHANNEL_URL="https://proxploy.com/releases/latest"
+else
+  CHANNEL_URL="https://web.proxploy.dev/releases/latest"
+fi
+
+log "update requested: $VERSION (installed $INSTALLED, channel $CHANNEL_URL)"
+exec "$PP_BIN/proxploy-update" --to "$VERSION" --channel "$CHANNEL_URL"

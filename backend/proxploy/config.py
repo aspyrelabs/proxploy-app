@@ -115,6 +115,7 @@ class Settings(BaseSettings):
     # finer than one minute, so 30s is already twice as often as it needs to be.
     scheduler_enabled: bool = True
     scheduler_tick_s: float = 30.0
+    update_check_on_boot: bool = True
     # Alert evaluation rides the poll cycle (services/alerts.py); off means the
     # poller still writes samples, nothing evaluates them.
     alerts_enabled: bool = True
@@ -144,6 +145,7 @@ class Settings(BaseSettings):
     # layout to switch.
     install_shape: str | None = None
     update_script: Path = Path("/opt/proxploy/bin/proxploy-update")
+    update_request_file: Path = Path("/var/lib/proxploy/update-request")
     update_timeout_s: float = 600.0
     # Written by the installer from inside the CT it creates, so
     # services/selfguard.py can recognise Proxploy's own container.

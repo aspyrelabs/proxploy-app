@@ -3,6 +3,7 @@
 `check()` never raises: every failure becomes a string the operator can act on
 instead of a Settings-page crash.
 """
+import json
 import os
 import shutil
 import subprocess
@@ -67,14 +68,59 @@ def check(settings: Settings) -> dict:
 def launch(settings: Settings, version: str) -> None:
     """Hand off to the updater and return immediately.
 
-    systemd-run puts the script in its OWN transient unit, outside this
-    process's cgroup. That is the whole point: the script restarts
-    proxploy.service, and anything living inside that cgroup would be killed
-    mid-update, leaving the symlink swapped and nothing running.
+    Writes the version to a request file that a root owned systemd path unit
+    watches (packaging/proxploy-update.path); its wrapper derives the
+    channel itself from the installed version, so this process never gets to
+    name a channel and a compromised app process can't point a root process
+    at a server of its own choosing. That path unit still puts the actual
+    update in its OWN unit, outside this process's cgroup, same reason as
+    before: the script restarts proxploy.service, and anything living inside
+    that cgroup would be killed mid-update, leaving the symlink swapped and
+    nothing running.
     """
-    script = str(settings.update_script)
-    systemd_run = shutil.which("systemd-run") or "/usr/bin/systemd-run"
-    subprocess.Popen(
-        [systemd_run, f"--unit=proxploy-update-{version}", "--collect",
-         script, "--to", version, "--channel", settings.release_channel_url],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    settings.update_request_file.write_text(version)
+
+
+UPDATE_PATH_UNIT = "proxploy-update.path"
+
+
+def path_unit_active(settings: Settings) -> bool:
+    systemctl = shutil.which("systemctl")
+    if not systemctl:
+        return False
+    try:
+        result = subprocess.run([systemctl, "is-active", UPDATE_PATH_UNIT],
+                                capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return result.stdout.strip() == "active"
+
+
+UPDATE_LOG_MAX_LINES = 2000
+
+
+def read_log(settings: Settings) -> dict:
+    updates_dir = Path(settings.data_dir) / "updates"
+    status_files = (sorted(updates_dir.glob("*.status"), key=lambda p: p.stat().st_mtime)
+                    if updates_dir.is_dir() else [])
+    if not status_files:
+        return {"state": "none", "version": None, "from": None,
+                "updated_at": None, "reason": None, "lines": []}
+    status_file = status_files[-1]
+    try:
+        status = json.loads(status_file.read_text())
+    except (OSError, json.JSONDecodeError):
+        status = {}
+    version = status.get("version")
+    log_file = updates_dir / f"{version}.log" if version else status_file.with_suffix(".log")
+    lines: list[str] = []
+    if log_file.exists():
+        lines = log_file.read_text(errors="replace").splitlines()[-UPDATE_LOG_MAX_LINES:]
+    return {
+        "state": status.get("state", "unknown"),
+        "version": version,
+        "from": status.get("from"),
+        "updated_at": status.get("updated_at"),
+        "reason": status.get("reason"),
+        "lines": lines,
+    }

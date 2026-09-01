@@ -81,3 +81,25 @@ export function useApplyUpdate() {
       }),
   })
 }
+
+export type UpdateLogState = 'none' | 'running' | 'succeeded' | 'failed' | 'rolled_back'
+
+export type UpdateLog = {
+  state: UpdateLogState
+  version: string | null
+  from: string | null
+  updated_at: string | null
+  reason: string | null
+  lines: string[]
+}
+
+const UPDATE_LOG_POLL_MS = 3000
+
+export function useUpdateLog(forcePoll = false) {
+  return useQuery({
+    queryKey: ['meta', 'update-log'],
+    queryFn: () => api<UpdateLog>('/meta/update/log'),
+    refetchInterval: (query) =>
+      forcePoll || query.state.data?.state === 'running' ? UPDATE_LOG_POLL_MS : false,
+  })
+}

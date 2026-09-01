@@ -31,7 +31,8 @@ def _make_app(tmp_path, fakes: dict):
 
     limiter.reset()
     s = Settings(db_url=f"sqlite:///{tmp_path}/t.db", data_dir=tmp_path,
-                master_key_file=tmp_path / "master.key", poll_enabled=False)
+                master_key_file=tmp_path / "master.key", poll_enabled=False,
+                update_check_on_boot=False)
     # Cross-host migration is Pro, and so is having a second host to migrate
     # to. This file is about the migration mechanics, not the tier boundary,
     # which test_entitlement_denied_branches.py covers.

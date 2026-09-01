@@ -152,16 +152,18 @@ tar "${tar_nometa[@]}" --exclude='._*' --exclude='.DS_Store' \
 # signing-key runbook, which names where the private key lives), this script
 # including its --poison flag, and packaging/docker/. Naming what SHOULD ship
 # means a new file in packaging/ is invisible to a release until someone adds
-# it here on purpose. These four are the complete set install.sh reads;
-# `grep PP_PKG install.sh` is the check.
-log "staging packaging/ (only the four files a target reads)..."
-for rel in proxploy-update lib/common.sh proxploy.service caddy/Caddyfile.tmpl; do
+# it here on purpose. These seven are the complete set install.sh and
+# proxploy-update read; `grep PP_PKG install.sh` and the UPD_PKG block in
+# proxploy-update are the check.
+log "staging packaging/ (only the seven files a target reads)..."
+for rel in proxploy-update proxploy-update-run lib/common.sh proxploy.service \
+           proxploy-update.path proxploy-update.service caddy/Caddyfile.tmpl; do
   src="$root/packaging/$rel"
   [ -f "$src" ] || { echo "error: packaging/$rel is missing" >&2; exit 1; }
   mkdir -p "$stage/packaging/$(dirname "$rel")"
   cat "$src" > "$stage/packaging/$rel"
 done
-chmod 0755 "$stage/packaging/proxploy-update"
+chmod 0755 "$stage/packaging/proxploy-update" "$stage/packaging/proxploy-update-run"
 
 log "overriding staged version to $version..."
 printf '__version__ = "%s"\n' "$version" > "$stage/backend/proxploy/__init__.py"

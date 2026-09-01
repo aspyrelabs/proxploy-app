@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Proxploy self-update (Phase 9a).
 #
-# Runs OUTSIDE the app's cgroup, launched by systemd-run from
-# services/updater.py::launch. That is deliberate: this script restarts
+# Runs OUTSIDE the app's cgroup, launched by proxploy-update.service (via
+# proxploy-update-run) off the path unit that watches the request file
+# services/updater.py::launch writes. That is deliberate: this script restarts
 # proxploy.service, and anything inside that cgroup would be killed halfway
 # through, leaving the symlink swapped and nothing serving.
 #
@@ -36,6 +37,66 @@ need_root
 
 FROM=$(basename "$(readlink -f "$PP_CURRENT")")
 BACKUP="$PP_DATA/pre-update/$FROM"
+
+# --- update log --------------------------------------------------------------
+# Lives under $PP_DATA, not releases/ (install_release() replaces that
+# wholesale) so it survives the restart below and is still there once the
+# app comes back up and wants to show the operator what happened. Every
+# existing log() call already writes to stderr, so teeing stderr here is
+# enough to capture all of it; no call site above needs to change.
+UPDATE_LOG_DIR="$PP_DATA/updates"
+mkdir -p "$UPDATE_LOG_DIR"
+LOG_FILE="$UPDATE_LOG_DIR/$TO.log"
+STATUS_FILE="$UPDATE_LOG_DIR/$TO.status"
+: > "$LOG_FILE"
+chown "$PP_USER:$PP_USER" "$UPDATE_LOG_DIR" "$LOG_FILE"
+exec 2> >(tee -a "$LOG_FILE" >&2)
+
+TERMINAL_WRITTEN=0
+write_status() {  # write_status <running|succeeded|failed|rolled_back> [reason]
+  local state="$1" reason="${2:-}" esc
+  # First terminal write wins: rollback() writes "rolled_back" and then calls
+  # die(), which would otherwise overwrite that with a plain "failed".
+  if [ "$TERMINAL_WRITTEN" -eq 1 ] && [ "$state" != running ]; then
+    return 0
+  fi
+  [ "$state" = running ] || TERMINAL_WRITTEN=1
+  esc=$(printf '%s' "$reason" | sed 's/\\/\\\\/g; s/"/\\"/g')
+  {
+    printf '{"state": "%s", "version": "%s", "from": "%s", "updated_at": "%s"' \
+      "$state" "$TO" "$FROM" "$(date -u +%FT%TZ)"
+    [ -z "$reason" ] || printf ', "reason": "%s"' "$esc"
+    printf '}\n'
+  } > "$STATUS_FILE"
+  chown "$PP_USER:$PP_USER" "$STATUS_FILE"
+}
+write_status running
+
+# die() (common.sh) is redefined here, not edited there: everything above
+# this line is a bare CLI-usage error before any status file exists, and
+# everything below, including inside common.sh's own helpers (verify_release,
+# manifest_field's callers), calls die by name, which bash resolves at call
+# time, so this redefinition catches those too. Writing the status here,
+# synchronously, is deliberate: the log file above goes through a `tee` in a
+# background process substitution, and reading it back in an EXIT trap could
+# race that pipe, this cannot.
+die() {
+  write_status failed "$*"
+  printf 'error: %s\n' "$*" >&2
+  exit 1
+}
+
+# Fallback only, for the rare exit that reaches here without going through
+# die() above (a bare command failing under `set -e`): best-effort reason
+# from the last logged line, which may occasionally lose the race with the
+# background `tee` and come up empty; better than leaving "running" forever.
+on_exit() {
+  [ -z "${work:-}" ] || rm -rf "$work"
+  if [ "$TERMINAL_WRITTEN" -eq 0 ]; then
+    write_status failed "$(tail -n1 "$LOG_FILE" 2>/dev/null || true)"
+  fi
+}
+trap on_exit EXIT
 
 rollback() {
   log "rolling back to $FROM"
@@ -71,7 +132,9 @@ rollback() {
     [ "$(date +%s)" -lt "$rb_deadline" ] || break
     sleep 2
   done
-  die "update to $TO failed; rolled back to $FROM"
+  local msg="update to $TO failed; rolled back to $FROM"
+  write_status rolled_back "$msg"
+  die "$msg"
 }
 
 # --- preflight -------------------------------------------------------------
@@ -94,7 +157,6 @@ echo "$FROM" > "$BACKUP/version"
 
 # --- download + verify -------------------------------------------------------
 work=$(mktemp -d)
-trap 'rm -rf "$work"' EXIT
 log "fetching $TO"
 fetch_to "$CHANNEL/manifest.json"     "$work/manifest.json"
 fetch_to "$CHANNEL/manifest.json.sig" "$work/manifest.json.sig"
@@ -106,10 +168,29 @@ verify_release "$work" "$PP_CURRENT/backend/proxploy/release_pubkey.pem"
 # --- unpack + migrate --------------------------------------------------------
 log "installing $TO"
 install_release "$work/$tarball" "$TO"
+
+# An existing 1.0/1.1 box has never had these three files: install or
+# refresh them from the release just unpacked, so the single hand-run that
+# takes a box through this update is the last manual step anyone performs
+# to get a working self-update button. Not gated on the migrate/switch below
+# succeeding: this is generic self-update plumbing, not part of the release
+# being applied.
+UPD_PKG="$PP_RELEASES/$TO/packaging"
+if [ -f "$UPD_PKG/proxploy-update-run" ]; then
+  log "refreshing the update-request wrapper and its systemd units"
+  install -m 0755 "$UPD_PKG/proxploy-update-run" "$PP_BIN/proxploy-update-run"
+  install -m 0644 "$UPD_PKG/proxploy-update.path" /etc/systemd/system/proxploy-update.path
+  install -m 0644 "$UPD_PKG/proxploy-update.service" /etc/systemd/system/proxploy-update.service
+  systemctl daemon-reload
+  systemctl enable --now proxploy-update.path
+else
+  log "release $TO predates the update-request wrapper, skipping it"
+fi
+
 log "migrating database"
 # config.py's Settings has no env_file: it only reads PROXPLOY_* from the
-# process environment, which systemd-run (services/updater.py::launch) does
-# not hand this script. Source the installer's env file by hand, the same
+# process environment, which proxploy-update.service does not hand this
+# script. Source the installer's env file by hand, the same
 # way install.sh does, or alembic's env.py falls back to the default
 # relative sqlite path and fails with "unable to open database file".
 set -a
@@ -156,6 +237,7 @@ if ! migrate_release "$PP_RELEASES/$TO"; then
   # would restore a backup over a database that is already unchanged: that
   # would be the bug, not the fix.
   log "migration failed; nothing was switched"
+  write_status failed "migration failed; nothing was switched"
   exit 1
 fi
 
@@ -170,4 +252,5 @@ until curl -fsS --max-time 5 http://127.0.0.1:8000/api/v1/meta/health >/dev/null
   sleep 2
 done
 
+write_status succeeded
 log "update to $TO complete"

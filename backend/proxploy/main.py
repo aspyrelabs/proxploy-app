@@ -192,7 +192,7 @@ def create_app(
         shutil.rmtree(settings.data_dir / "uploads", ignore_errors=True)
         app.state.poller = Poller(app)
         app.state.scheduler = Scheduler(app)
-        poller_task = scheduler_task = None
+        poller_task = scheduler_task = update_check_task = None
         repair_task = asyncio.create_task(_repair_privileges_at_boot())
         if settings.alerts_enabled:
             # Evaluation rides the poll loop (pollers/__init__.py), so the rules
@@ -214,6 +214,27 @@ def create_app(
                 prime(db, utcnow())
             scheduler_task = asyncio.create_task(app.state.scheduler.run())
 
+            if settings.update_check_on_boot:
+                async def _check_update_at_boot():
+                    from proxploy.models import Job
+
+                    try:
+                        with app.state.sessionmaker() as db:
+                            pending = (db.query(Job)
+                                       .filter(Job.kind == "update.check",
+                                               Job.status.in_(("queued", "running")))
+                                       .first())
+                            if pending is None:
+                                app.state.jobs.enqueue(
+                                    db, kind="update.check", target_type="system",
+                                    target_id=None, params={}, requested_by=None)
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception:
+                        logger.exception("could not enqueue the boot-time update check")
+
+                update_check_task = asyncio.create_task(_check_update_at_boot())
+
         # Persist the installer-supplied CT id once (write-once: an existing
         # value wins) so services/selfguard.py can recognise our own container.
         if settings.self_ctid is not None:
@@ -231,6 +252,8 @@ def create_app(
             poller_task.cancel()
         if scheduler_task:
             scheduler_task.cancel()
+        if update_check_task:
+            update_check_task.cancel()
         app.state.scheduler.stop()
         app.state.poller.stop()
         app.state.jobs.stop()

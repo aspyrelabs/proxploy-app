@@ -655,6 +655,25 @@ log "installing the updater"
 install -m 0755 "$PP_PKG/proxploy-update" "$PP_BIN/proxploy-update"
 install -m 0644 "$PP_PKG/lib/common.sh" "$PP_LIB/common.sh"
 
+# --- 7b. the update-request wrapper and its path unit ------------------------
+# proxploy-update-run is root owned and NOT writable by the proxploy user:
+# the app can only ask for a version by writing the request file, and this
+# is the only thing that ever reads it. Skipped on a re-run once installed,
+# same as the env file in step 5, so an operator's own edits to the path
+# unit survive an install run from a newer release.
+if [ -f "$PP_BIN/proxploy-update-run" ]; then
+  log "the update-request wrapper is already installed, leaving it alone"
+else
+  log "installing the update-request wrapper and its path unit"
+  install -m 0755 "$PP_PKG/proxploy-update-run" "$PP_BIN/proxploy-update-run"
+  install -m 0644 "$PP_PKG/proxploy-update.path" \
+    /etc/systemd/system/proxploy-update.path
+  install -m 0644 "$PP_PKG/proxploy-update.service" \
+    /etc/systemd/system/proxploy-update.service
+  systemctl daemon-reload
+  systemctl enable --now proxploy-update.path
+fi
+
 # --- 8. point current at this release (atomic-ish symlink swap) -------------
 log "switching current -> releases/$VERSION"
 ln -sfn "$PP_RELEASES/$VERSION" "$PP_CURRENT.tmp"

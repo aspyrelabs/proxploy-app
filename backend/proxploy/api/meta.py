@@ -76,6 +76,12 @@ def update_status(request: Request):
     return body
 
 
+@router.get("/update/log", dependencies=[Depends(_read), Depends(_self_update)])
+def update_log(request: Request):
+    settings = request.app.state.settings
+    return updater.read_log(settings)
+
+
 @router.post("/update", status_code=202,
              dependencies=[Depends(_manage), Depends(_self_update)])
 def apply_update(request: Request, body: UpdateIn, user=Depends(_manage), db=Depends(get_db)):
@@ -97,8 +103,16 @@ def apply_update(request: Request, body: UpdateIn, user=Depends(_manage), db=Dep
         raise HTTPException(503, {"error": "updater_missing",
                                   "detail": f"{settings.update_script} is not installed, "
                                             f"re-run the installer to repair it"})
+    if not updater.path_unit_active(settings):
+        raise HTTPException(503, {"error": "updater_not_watching",
+                                  "detail": f"{updater.UPDATE_PATH_UNIT} is not active, "
+                                            f"re-run the installer to repair it"})
     write_audit(db, actor_type="user", actor_id=user.id,
                 action="system.update.start", target_type="system",
                 ip=request.client.host if request.client else None)
-    updater.launch(settings, body.version)
+    try:
+        updater.launch(settings, body.version)
+    except OSError as e:
+        raise HTTPException(500, {"error": "update_request_failed",
+                                  "detail": f"could not write the update request: {e}"})
     return {"ok": True, "version": body.version}

@@ -64,6 +64,8 @@ def make_app(tmp_path, fake=None, ssh_factory=None, **overrides):
     if ssh_factory is not None:
         kwargs["ssh_factory"] = ssh_factory
     overrides.setdefault("poll_enabled", False)
+    overrides.setdefault("update_check_on_boot", False)
+    overrides.setdefault("release_channel_url", f"file://{tmp_path}/no-release-channel")
     s = Settings(db_url=f"sqlite:///{tmp_path}/t.db", data_dir=tmp_path,
                  master_key_file=tmp_path / "master.key", **overrides)
     return create_app(s, **kwargs)

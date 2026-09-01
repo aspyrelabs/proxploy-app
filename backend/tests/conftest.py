@@ -33,6 +33,8 @@ def client(tmp_path):
         db_url=f"sqlite:///{tmp_path}/proxploy.db",
         data_dir=tmp_path,
         master_key_file=tmp_path / "master.key",
+        release_channel_url=f"file://{tmp_path}/no-release-channel",
+        update_check_on_boot=False,
     )
     app = create_app(s)
     with TestClient(app) as c:

@@ -1,0 +1,9 @@
+[Unit]
+Description=Apply a Proxploy self-update request
+# Started only by proxploy-update.path, never enabled or run directly.
+
+[Service]
+Type=oneshot
+# No User= here on purpose: this runs as root, which is the entire reason
+# the request file exists rather than the app doing this itself.
+ExecStart=/opt/proxploy/bin/proxploy-update-run
