@@ -32,7 +32,7 @@ def _release_channel_url(env: str) -> str:
     Releases: the source repo is private, and private release assets need an
     authenticated fetch that an installer has no credential for.
     """
-    base = WEB_BASE_URL_BY_ENV.get(env, WEB_BASE_URL_BY_ENV["dev"])
+    base = WEB_BASE_URL_BY_ENV.get(env, WEB_BASE_URL_BY_ENV["prod"])
     return f"{base}/releases/latest"
 
 
@@ -41,7 +41,7 @@ class Settings(BaseSettings):
 
     # Invalid values must raise at startup, not fall back: this is config at
     # a trust boundary, and a typo here must not silently point prod at dev.
-    env: Literal["dev", "prod"] = "dev"
+    env: Literal["dev", "prod"] = "prod"
     db_url: str = "sqlite:///./data/proxploy.db"
     data_dir: Path = Path("./data")
     master_key_file: Path = Path("./data/master.key")
@@ -159,9 +159,9 @@ class Settings(BaseSettings):
         # pick here.
         if not isinstance(data, dict):
             return data
-        env = data.get("env", "dev")
+        env = data.get("env", "prod")
         if data.get("api_base_url") is None:
-            data = {**data, "api_base_url": API_BASE_URL_BY_ENV.get(env, API_BASE_URL_BY_ENV["dev"])}
+            data = {**data, "api_base_url": API_BASE_URL_BY_ENV.get(env, API_BASE_URL_BY_ENV["prod"])}
         if data.get("release_channel_url") is None:
             data = {**data, "release_channel_url": _release_channel_url(env)}
         return data

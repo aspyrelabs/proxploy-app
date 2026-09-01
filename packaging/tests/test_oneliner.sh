@@ -48,7 +48,16 @@ env_url() {  # env_url <PROXPLOY_ENV>
   || { echo "FAIL: dev resolved to $(env_url dev)"; exit 1; }
 [ "$(env_url prod)" = "https://proxploy.com/install.sh" ] \
   || { echo "FAIL: prod resolved to $(env_url prod)"; exit 1; }
-echo "OK: the install URL follows PROXPLOY_ENV"
+# The DEFAULT, not just the explicit values. The published installer carried
+# a dev default while it was served from proxploy.com, so a production install
+# fetched its payload from web.proxploy.dev and licensed against
+# api.proxploy.dev without saying so. Only an unset PROXPLOY_ENV reproduces
+# that, which is why neither check above caught it.
+default_url=$( cd "$work" && env -u PROXPLOY_ENV bash -s -- --shape systemd --dry-parse \
+    < "$work/install.sh" 2>&1 | sed -n 's/.*installer=\([^ ]*\).*/\1/p' )
+[ "$default_url" = "https://proxploy.com/install.sh" ] \
+  || { echo "FAIL: with PROXPLOY_ENV unset the installer resolved to $default_url"; exit 1; }
+echo "OK: the install URL follows PROXPLOY_ENV, and defaults to prod"
 
 # The one-liner passes no flags, so --shape has to be worked out rather than
 # demanded. Running it inside a CT you made yourself used to die on

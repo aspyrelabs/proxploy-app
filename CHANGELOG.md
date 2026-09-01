@@ -1,5 +1,99 @@
 # Changelog
 
+## 1.2.0 (2026-09-01)
+
+5 commits since the 1.1.0 release build.
+
+### Read this before upgrading
+
+Every install made before this release points at dev infrastructure. The
+published installer defaulted to `PROXPLOY_ENV=dev`, because that default was
+correct while the licence server at api.proxploy.com was not yet answering and
+it was never flipped once it was. A box installed from proxploy.com therefore
+wrote `PROXPLOY_ENV=dev` into `/etc/proxploy/proxploy.env`, licensed against
+api.proxploy.dev and fetched its own updates from web.proxploy.dev.
+
+Taking this release fixes that. `proxploy-update` rewrites `PROXPLOY_ENV=dev`
+to `prod` in place, keeping a timestamped backup of the file beside it, and
+every later update comes from proxploy.com. Re-running the installer does NOT
+fix it: install.sh leaves an existing env file alone on purpose so a re-run
+cannot clobber an operator's settings.
+
+An operator who genuinely wants the dev pair adds `PROXPLOY_ENV_PINNED=1` to
+the same file. It is checked first and is never overwritten. There is no
+record of which URL a box was installed from, so a deliberate dev install
+cannot be told apart from one that inherited the broken default, and the pin
+is the way to say which is which.
+
+The dev release channel keeps serving until every install has taken this
+release. It is the only route to a box that has not yet been migrated.
+
+### Virtual machines
+
+- The create wizard covers the whole Proxmox create surface rather than seven
+  fields: machine type, BIOS, EFI disk, TPM, guest agent, SCSI controller, the
+  VirtIO driver ISO, disk bus and cache, CPU, memory and the network settings.
+  A plain Linux VM is still the same few clicks, with the rarely touched
+  settings behind a disclosure in each step.
+- Windows 11 can be built and installed. It needs q35, OVMF, an EFI disk and a
+  TPM, and none of those could be set before.
+- An install ISO now boots ahead of the empty disk, so a new VM reaches the
+  installer instead of stopping at "no bootable option or device found".
+- An ISO can be mounted and ejected on an existing guest, from the row menu.
+  The write refuses rather than overwrite an ide slot holding a data disk.
+- A guest that is not running reads unknown for CPU, memory and network
+  instead of reporting zero, and draws no graph line for a period it was not
+  running. Allocations still read true, because what a guest is assigned does
+  not stop being true when it stops.
+- A newly created VM appears in the list in about a second rather than
+  whenever the next poll happened to land.
+
+### Proxmox privileges
+
+- Every privilege Proxploy needs is granted by the onboarding script. Two were
+  not: `Sys.Console`, which rode a flag wired to an unrelated checkbox and so
+  was granted by accident or not at all, and `Datastore.AllocateTemplate`,
+  which was in no role, meaning uploads could not work. `Pool.Allocate` and
+  `VM.Config.CDROM` were added for the create wizard's resource pool field and
+  for changing a guest's media.
+- An existing install has its roles repaired automatically at boot, over the
+  SSH key Proxploy already holds. Every repair is audited and notified: it
+  widens Proxploy's own access and must never be invisible.
+- A repair writes the union of the live role and what the product needs, never
+  the product's list alone. `pveum role modify` replaces, so writing our list
+  would delete privileges an operator added by hand.
+- A short token is reported as a gap on the Hosts page instead of the host
+  reading clean, because the gap probe and the setup script now read the same
+  list.
+
+### Storage
+
+- Uploading an ISO reports real progress the whole way, including the long
+  leg from Proxploy to the node, which previously sat silent for minutes.
+- An upload can be cancelled at any stage, or left running in the background
+  so the session stays free.
+- An upload that stops because the server restarted says so instead of leaving
+  a progress bar that will never move.
+- The upload form opens on ISO rather than whichever content type Proxmox
+  happened to list first, and follows the file that is picked, so an ISO is no
+  longer filed as a container template.
+- A finished upload appears in the datastore without a manual refresh, and the
+  list keeps polling as a fallback when the event stream is down.
+
+### Fixes
+
+- Open Proxmox web UI adds the port when the stored address has none. Only the
+  browser link was affected: every API path already defaulted to 8006.
+- An explicit API timeout replaces the HTTP library's 5 second default, which
+  a directory listing on a busy NFS datastore already exceeded.
+- Node shell is on by default for a new host, a cluster peer included. An SSH
+  key and install consent are still never inherited by a peer.
+- Long values no longer widen the panel they sit in. A grid or flex child
+  defaults to a minimum width of its content, so an ISO filename pushed its
+  container open instead of being clipped.
+- A meter with no reading draws no bar at all, rather than an empty track
+  beside the word unknown that reads as a real measurement of nothing.
+
 ## 1.1.0 (2026-08-30)
 
 79 commits since the 1.0.0 release build.

@@ -33,7 +33,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || echo
 # with that instead of the advice. The strict dev|prod check is further down,
 # after common.sh gives us `die`, so an unrecognised value falls back to the
 # dev host for that one message and is refused a few lines later.
-: "${PROXPLOY_ENV:=dev}"
+: "${PROXPLOY_ENV:=prod}"
 case "$PROXPLOY_ENV" in
   prod) WEB_BASE_URL="https://proxploy.com" ;;
   *)    WEB_BASE_URL="https://web.proxploy.dev" ;;
@@ -91,11 +91,13 @@ DEFAULT_CHANNEL="$WEB_BASE_URL/releases/latest"
 # Defaulted above (it has to be, the install URL derives from it). Validated
 # here rather than there because `die` arrives with common.sh.
 #
-# The default is dev, and stays dev until the prod licence server at
-# api.proxploy.com is actually live: `env` is what picks it (config.py's
-# API_BASE_URL_BY_ENV), so defaulting to prod today would point every install
-# at an API that does not answer. Flipping this line is the switch when it
-# does; `export PROXPLOY_ENV=prod` is how to install against it before then.
+# The default is prod. It was dev while the licence server at
+# api.proxploy.com was not yet answering, and the cost of leaving it that way
+# one release too long was real: the installer published at proxploy.com
+# pulled its own payload from web.proxploy.dev and licensed against
+# api.proxploy.dev, so a production install ran on dev infrastructure without
+# saying so. api.proxploy.com answers now. `export PROXPLOY_ENV=dev` is how to
+# install against the dev pair.
 case "$PROXPLOY_ENV" in
   dev|prod) ;;
   *) die "PROXPLOY_ENV must be dev or prod, got: $PROXPLOY_ENV" ;;

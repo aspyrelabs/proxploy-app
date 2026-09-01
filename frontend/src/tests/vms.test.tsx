@@ -23,6 +23,7 @@ let capabilities: Record<string, boolean> = { lifecycle: true, console: true }
 let deleteOutcome: 'ok' | 'guest_running' | 'self_target' = 'ok'
 const calls: { path: string; method: string; body: any }[] = []
 const ISO_VOLID = 'local:iso/debian-12.7.0-amd64-netinst.iso'
+const ISO_NAME = 'debian-12.7.0-amd64-netinst.iso'
 let cdromStatus: { key: string | null; volid: string | null; mounted: boolean } =
   { key: null, volid: null, mounted: false }
 const cdromWrites: (string | null)[] = []
@@ -265,7 +266,7 @@ describe('VmActionsMenu mount ISO', () => {
   it('opens a dialog, not the row, and shows nothing mounted until something is', async () => {
     wrap(VM)
     openMenu()
-    fireEvent.click(await screen.findByRole('menuitem', { name: /mount iso/i }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: /mount\/eject iso/i }))
     const dialog = await screen.findByRole('dialog')
     await waitFor(() => expect(within(dialog).getByText('Nothing mounted')).toBeInTheDocument())
     expect(within(dialog).queryByRole('button', { name: 'Eject' })).not.toBeInTheDocument()
@@ -274,12 +275,12 @@ describe('VmActionsMenu mount ISO', () => {
   it('picks a datastore, picks an ISO, and mounts it', async () => {
     wrap(VM)
     openMenu()
-    fireEvent.click(await screen.findByRole('menuitem', { name: /mount iso/i }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: /mount\/eject iso/i }))
     const dialog = await screen.findByRole('dialog')
     await waitFor(() => expect(within(dialog).getByText('Nothing mounted')).toBeInTheDocument())
 
     fireEvent.change(within(dialog).getByLabelText('Datastore'), { target: { value: 'local' } })
-    await within(dialog).findByRole('option', { name: ISO_VOLID })
+    await within(dialog).findByRole('option', { name: ISO_NAME })
     fireEvent.change(within(dialog).getByLabelText('ISO image'), { target: { value: ISO_VOLID } })
 
     fireEvent.click(within(dialog).getByRole('button', { name: 'Mount' }))
@@ -292,7 +293,7 @@ describe('VmActionsMenu mount ISO', () => {
     cdromStatus = { key: 'ide2', volid: ISO_VOLID, mounted: true }
     wrap(VM)
     openMenu()
-    fireEvent.click(await screen.findByRole('menuitem', { name: /mount iso/i }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: /mount\/eject iso/i }))
     const dialog = await screen.findByRole('dialog')
     fireEvent.click(await within(dialog).findByRole('button', { name: 'Eject' }))
     await waitFor(() => expect(cdromWrites).toEqual([null]))

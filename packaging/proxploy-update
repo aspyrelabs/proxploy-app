@@ -116,6 +116,40 @@ set -a
 # shellcheck source=/dev/null
 . "$PP_ENV"
 set +a
+
+# --- environment migration ---------------------------------------------------
+# Every install made before this release carries PROXPLOY_ENV=dev, because the
+# published installer defaulted to dev while api.proxploy.com was not yet
+# answering and that default was never flipped. Those boxes licence against
+# api.proxploy.dev and fetch their own updates from web.proxploy.dev, so the
+# dev channel is the ONLY way this fix can reach them: it must keep serving
+# until they have all taken this release.
+#
+# Rewritten here rather than in install.sh, which leaves an existing env file
+# alone on purpose so a re-run cannot clobber an operator's settings.
+#
+# An operator who deliberately wants dev sets PROXPLOY_ENV_PINNED=1 in the
+# same file, which is checked first and is never overwritten. Without a record
+# of which URL a box was installed from there is no way to tell a deliberate
+# dev install from one that simply inherited the broken default, so the
+# migration runs and the pin is the documented way to opt back in.
+if grep -qE '^PROXPLOY_ENV_PINNED=1' "$PP_ENV" 2>/dev/null; then
+  log "PROXPLOY_ENV is pinned, leaving it at ${PROXPLOY_ENV:-unset}"
+elif grep -qE '^PROXPLOY_ENV=dev[[:space:]]*$' "$PP_ENV" 2>/dev/null; then
+  log "migrating PROXPLOY_ENV from dev to prod"
+  cp -a "$PP_ENV" "$PP_ENV.bak-$(date +%Y%m%d%H%M%S)"
+  tmp_env=$(mktemp)
+  sed 's/^PROXPLOY_ENV=dev[[:space:]]*$/PROXPLOY_ENV=prod/' "$PP_ENV" > "$tmp_env"
+  if grep -qE '^PROXPLOY_ENV=prod$' "$tmp_env"; then
+    cat "$tmp_env" > "$PP_ENV"
+    rm -f "$tmp_env"
+    set -a; . "$PP_ENV"; set +a
+    log "PROXPLOY_ENV is now prod; updates will come from proxploy.com"
+  else
+    rm -f "$tmp_env"
+    log "could not rewrite PROXPLOY_ENV, leaving it at dev"
+  fi
+fi
 if ! migrate_release "$PP_RELEASES/$TO"; then
   # Nothing was switched: the old version is still running and its database
   # was never touched by a migration that failed to apply. Rolling back here

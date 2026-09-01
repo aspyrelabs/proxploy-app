@@ -193,6 +193,6 @@ describe('VmCreateWizard, the enabled-gated ISO image select', () => {
     isos.resolve([{ volid: 'local:iso/ubuntu-24.04.iso', size: 6000000000 }])
 
     await waitFor(() => expect(iso).toBeEnabled())
-    expect(optionTexts(iso)).toEqual(['Select an ISO…', 'local:iso/ubuntu-24.04.iso'])
+    expect(optionTexts(iso)).toEqual(['Select an ISO…', 'ubuntu-24.04.iso'])
   })
 })

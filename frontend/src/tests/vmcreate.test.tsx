@@ -154,7 +154,7 @@ describe('VmCreateWizard', () => {
     const isoStorageSelect = await screen.findByLabelText(/^iso storage$/i)
     await within(isoStorageSelect).findByRole('option', { name: 'nfs-shared' })
     fireEvent.change(isoStorageSelect, { target: { value: 'nfs-shared' } })
-    await screen.findByRole('option', { name: 'local:iso/ubuntu-24.04.iso' })
+    await screen.findByRole('option', { name: 'ubuntu-24.04.iso' })
     fireEvent.change(screen.getByLabelText(/^iso image$/i),
       { target: { value: 'local:iso/ubuntu-24.04.iso' } })
     next()
@@ -209,7 +209,7 @@ describe('VmCreateWizard', () => {
     fireEvent.change(await screen.findByLabelText(/^iso storage$/i), { target: { value: 'local' } })
     // The ISO list only loads once a datastore is picked; wait for the <option>
     // itself, or fireEvent.change sets a value that has no matching option.
-    await screen.findByRole('option', { name: 'local:iso/ubuntu-24.04.iso' })
+    await screen.findByRole('option', { name: 'ubuntu-24.04.iso' })
     fireEvent.change(screen.getByLabelText(/^iso image$/i),
       { target: { value: 'local:iso/ubuntu-24.04.iso' } })
     fireEvent.change(screen.getByLabelText(/os type/i), { target: { value: 'l26' } })
@@ -256,13 +256,13 @@ describe('VmCreateWizard', () => {
     next()
 
     fireEvent.change(await screen.findByLabelText(/^iso storage$/i), { target: { value: 'local' } })
-    await screen.findByRole('option', { name: 'local:iso/ubuntu-24.04.iso' })
+    await screen.findByRole('option', { name: 'ubuntu-24.04.iso' })
     fireEvent.change(screen.getByLabelText(/^iso image$/i),
       { target: { value: 'local:iso/ubuntu-24.04.iso' } })
     fireEvent.change(screen.getByLabelText(/os type/i), { target: { value: 'win11' } })
     fireEvent.change(screen.getByLabelText(/virtio drivers storage/i), { target: { value: 'local' } })
     const virtioIsoSelect = await screen.findByLabelText(/virtio drivers iso/i)
-    await within(virtioIsoSelect).findByRole('option', { name: 'local:iso/ubuntu-24.04.iso' })
+    await within(virtioIsoSelect).findByRole('option', { name: 'ubuntu-24.04.iso' })
     fireEvent.change(virtioIsoSelect, { target: { value: 'local:iso/ubuntu-24.04.iso' } })
     next()
 
@@ -323,7 +323,7 @@ describe('VmCreateWizard', () => {
     next()
 
     fireEvent.change(await screen.findByLabelText(/^iso storage$/i), { target: { value: 'local' } })
-    await screen.findByRole('option', { name: 'local:iso/ubuntu-24.04.iso' })
+    await screen.findByRole('option', { name: 'ubuntu-24.04.iso' })
     fireEvent.change(screen.getByLabelText(/^iso image$/i),
       { target: { value: 'local:iso/ubuntu-24.04.iso' } })
     next()
@@ -353,7 +353,7 @@ describe('VmCreateWizard', () => {
     next()
 
     fireEvent.change(await screen.findByLabelText(/^iso storage$/i), { target: { value: 'local' } })
-    await screen.findByRole('option', { name: 'local:iso/ubuntu-24.04.iso' })
+    await screen.findByRole('option', { name: 'ubuntu-24.04.iso' })
     fireEvent.change(screen.getByLabelText(/^iso image$/i),
       { target: { value: 'local:iso/ubuntu-24.04.iso' } })
     next()
@@ -515,7 +515,7 @@ describe('VmsPage pending VM indicator', () => {
     next()
 
     fireEvent.change(await screen.findByLabelText(/^iso storage$/i), { target: { value: 'local' } })
-    await screen.findByRole('option', { name: 'local:iso/ubuntu-24.04.iso' })
+    await screen.findByRole('option', { name: 'ubuntu-24.04.iso' })
     fireEvent.change(screen.getByLabelText(/^iso image$/i),
       { target: { value: 'local:iso/ubuntu-24.04.iso' } })
     next()
