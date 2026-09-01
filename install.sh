@@ -813,9 +813,21 @@ configure_tls
 # usable) and curl's 000 (nothing answered at all); a 404 still proves the
 # whole chain from TLS to uvicorn is live.
 verify_serving() {
-  local code
-  code=$(curl -sk -o /dev/null -m 10 -w '%{http_code}' "https://127.0.0.1/" \
-         2>/dev/null) || code="000"
+  local code deadline
+  # Retried, not asked once: systemd calls caddy active the moment it forks,
+  # and proxploy active before uvicorn has bound, so a single curl here races
+  # an install that is perfectly fine and tells the operator nothing is
+  # serving. 000 (no listener yet) and 5xx (caddy up, app not answering it
+  # yet) are both the not-ready-yet shape; whatever the last try saw is what
+  # gets reported once the budget runs out.
+  deadline=$(( $(date +%s) + 30 ))
+  while :; do
+    code=$(curl -sk -o /dev/null -m 10 -w '%{http_code}' "https://127.0.0.1/" \
+           2>/dev/null) || code="000"
+    case "$code" in 000|5*) ;; *) break ;; esac
+    [ "$(date +%s)" -lt "$deadline" ] || break
+    sleep 2
+  done
   case "$code" in
     000) log "nothing answered on https://127.0.0.1/. caddy is\
  $(systemctl is-active caddy 2>/dev/null), proxploy is\
